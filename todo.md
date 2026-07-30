@@ -1,23 +1,25 @@
-# mkprs.sh — open feature work
+# mkprs — open feature work
 
 Items left from the design review. The top 5 footguns (dirty-tree check,
 fetch-before-branch, default-branch detection, existing-branch handling,
 push-failure cleanup) are done.
 
-Formerly `git-patch-apply.sh`. The patch-specific design was replaced with
-"run an arbitrary command in each repo"; the items that only made sense for
-patching (`--source` selection, patch-hash branch names, `--3way` apply) have
-been dropped rather than carried forward.
+Formerly `git-patch-apply.sh`, then `mkprs.sh`. The patch-specific design was
+replaced with "run an arbitrary command in each repo"; the items that only made
+sense for patching (`--source` selection, patch-hash branch names, `--3way`
+apply) have been dropped rather than carried forward. The bash implementation
+was ported to Go at strict parity and deleted; the suite in `test.sh` is the
+same one that verified the port.
 
 ## Implicit-behavior surprises
 
 ### 1. PR base branch is hardcoded to `main`
 
-`create_pr` passes `gh pr create --base main`. Repos with `develop`/`trunk`/etc.
-as their default get the wrong base.
+`createPR` (`internal/mkprs/pr.go`) passes `gh pr create --base main`. Repos with
+`develop`/`trunk`/etc. as their default get the wrong base.
 
-- Reuse `default_branch` from the target repo as the default `--base`.
-  `run_command` already computes it — thread it through to `create_pr` rather
+- Reuse `defaultBranch` from the target repo as the default `--base`.
+  `runCommand` already computes it — thread it through to `createPR` rather
   than recomputing.
 - Add `--pr-base <branch>` flag to override.
 
@@ -107,13 +109,16 @@ Streams command output live, prefixed with the repo name, instead of buffering i
 
 Across N repos with network round-trips this is painfully slow.
 
-- `xargs -P <N>` over the per-repo function, or background each iteration with a semaphore.
+- `golang.org/x/sync/errgroup` with `SetLimit(N)` over `processRepo`, exposed as
+  `-j/--jobs <N>`. This is the item that motivated leaving bash.
 - Depends on #3: per-repo output capture is a prerequisite, since live
-  interleaved stderr is unreadable at `-P >1`.
+  interleaved stderr is unreadable at more than one job. `capture` already
+  buffers per repo, so results stay coherent; only `--verbose` interleaves.
+- Result lines must be emitted from a single goroutine to stay one-per-line.
 
 ### 7. `--keep-branch` / `--no-cleanup`
 
-`cleanup_branch` always deletes the local branch after the PR is opened.
+`cleanupBranch` always deletes the local branch after the PR is opened.
 Sometimes you want it for follow-up edits.
 
 - Add `--keep-branch` to skip the `git branch -D` step.
@@ -133,7 +138,8 @@ was nothing meaningful to preview short of running the command.
 
 One hung command currently stalls an entire 30-repo run with no feedback.
 
-- Wrap execution in `timeout <N>`; treat expiry as a normal per-repo failure.
+- Run the command with `exec.CommandContext` under a `context.WithTimeout`;
+  treat expiry as a normal per-repo failure.
 - Expose via `--timeout <seconds>`, unset by default.
 
 ### 10. `--max-repos` safety limit
@@ -175,14 +181,13 @@ create files), but a command that drops build artifacts in a repo with a thin
 
 ## Lower-priority polish
 
-- **Bash version check**: error early if `BASH_VERSINFO[0] < 3` (defensive).
-- **Trailing-flag robustness**: `mkprs.sh tgt -b -- true` silently takes `--` as
-  the branch name. `${2-}` keeps it from dying under `set -u`, but a real
-  "missing value for `-b`" check in `parse_args` would be better.
-- **Pre-existing `discover_repos` shellcheck note**: SC2156 was avoided in the
-  rewrite — keep the `find ... -prune -print0 | dirname` pattern.
+- **Trailing-flag robustness**: `mkprs tgt -b -- true` silently takes `--` as the
+  branch name, then fails with "no command specified" because the terminator was
+  consumed. pflag has no required-value-guard for this; an explicit check that
+  no flag value starts with `--` would give a better message. Still reproducible
+  after the Go port.
 - **Nested repo discovery** (corrected — the earlier note here was wrong):
-  nested repositories *are* discovered. `-prune` stops descent into the `.git`
+  nested repositories *are* discovered. Pruning stops descent into the `.git`
   directory itself, not into the rest of the tree, so a repo inside another repo
   is visited and both are processed. Verified against `~/Code`, where
   `CSharp/TestProjects` is a repo containing 10 nested repos and all 11 are
@@ -191,7 +196,8 @@ create files), but a command that drops build artifacts in a repo with a thin
   and a run against a large tree can process far more repos than expected. This
   is the concrete argument for #10 (`--max-repos`).
 
-  Submodules *are* excluded, but because of `-type d`, not `-prune`: a
-  submodule's `.git` is a file holding a `gitdir:` pointer, not a directory.
-  The Go port reproduces both halves and `test_discovers_nested_repos` pins
+  Submodules *are* excluded, because only `.git` *directories* count: a
+  submodule's `.git` is a file holding a `gitdir:` pointer. `discoverRepos`
+  (`internal/mkprs/discover.go`) keys off `d.IsDir()` for exactly this reason,
+  and `test_discovers_nested_repos` pins
   them.

@@ -1,2 +1,3 @@
 # Build output. test.sh compiles this on every run.
 /mkprs
+/.idea/

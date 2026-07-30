@@ -1,4 +1,4 @@
-package main
+package mkprs
 
 import (
 	"bytes"
@@ -57,9 +57,8 @@ func (c *capture) flush() {
 	}
 }
 
-// raw appends to the capture without streaming it. gh's output is recorded but
-// never echoed live, matching the original's direct `>> "$CAPTURE_FILE"`
-// redirections in create_pr.
+// raw appends to the capture without streaming it. gh's output is recorded in
+// the log but never echoed live, even under --verbose.
 func (c *capture) raw() io.Writer { return &c.buf }
 
 func (c *capture) String() string { return c.buf.String() }

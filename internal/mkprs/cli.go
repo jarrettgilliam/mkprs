@@ -1,4 +1,4 @@
-package main
+package mkprs
 
 import (
 	"fmt"
@@ -86,8 +86,8 @@ func printUsage(w io.Writer, fs *pflag.FlagSet) {
 	fmt.Fprint(w, usageTail)
 }
 
-// parseArgs mirrors parse_args from the original script. It exits the process
-// on any usage error rather than returning one, the way the shell version did.
+// parseArgs builds the config from argv. It exits the process on any usage
+// error rather than returning one.
 func parseArgs(args []string) *config {
 	cfg := &config{}
 

@@ -5,8 +5,8 @@ set -euo pipefail
 # Tests for mkprs
 #
 # Builds the binary, then drives it as a black box. These same assertions ran
-# against the original mkprs.sh, which is what makes them a port conformance
-# check rather than just a test suite.
+# unchanged against the original bash implementation, which is what made them a
+# port conformance check rather than just a test suite.
 #
 # Fixtures use real local bare repos wired up through url.<...>.insteadOf, so
 # fetch and push genuinely work while the origin URL still looks like GitHub.
