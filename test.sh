@@ -452,8 +452,56 @@ test_skips_existing_branch() {
   content=$(cat "$w/targets/has-branch/file.txt")
   rm -rf "$w"
 
-  assert_contains "warns about existing branch" "$out" "skipped: branch 'already-here' already exists"
+  assert_contains "warns about existing branch" "$out" "skipped: branch 'already-here' already exists locally"
   assert_equals   "command never runs"          "hello" "$content"
+}
+
+test_skips_branch_existing_on_origin() {
+  echo "test_skips_branch_existing_on_origin:"
+  local w
+  w=$(new_workspace)
+  make_repo "$w" "$w/targets/on-origin" "on-origin" "git@github.com:fake/on-origin.git"
+  # Push the branch, then drop the local copy: only origin has it now.
+  git -C "$w/targets/on-origin" push -q origin HEAD:refs/heads/upstream-only
+  git -C "$w/targets/on-origin" fetch -q origin
+
+  local out
+  out=$(run_sut "$w" "$w/targets" -b upstream-only -- bash -c 'echo x > file.txt')
+  local content
+  content=$(cat "$w/targets/on-origin/file.txt")
+  rm -rf "$w"
+
+  assert_contains "names origin as the location" "$out" "skipped: branch 'upstream-only' already exists on origin"
+  assert_equals   "command never runs"           "hello" "$content"
+}
+
+# Regression: a merged-and-deleted PR branch leaves refs/remotes/origin/<branch>
+# behind locally. The branch check has to run after the pruning fetch, or every
+# repo skips on the next run with the same branch name.
+test_stale_remote_branch_is_pruned() {
+  echo "test_stale_remote_branch_is_pruned:"
+  local w
+  w=$(new_workspace)
+  make_repo "$w" "$w/targets/stale" "stale" "git@github.com:fake/stale.git"
+  # Create the remote-tracking ref, then delete the branch on the remote only --
+  # exactly the state GitHub leaves after "delete branch on merge".
+  git -C "$w/targets/stale" push -q origin HEAD:refs/heads/gone
+  git -C "$w/targets/stale" fetch -q origin
+  git -C "$w/remotes/stale.git" update-ref -d refs/heads/gone
+
+  local stale_ref="no"
+  git -C "$w/targets/stale" rev-parse --verify --quiet refs/remotes/origin/gone >/dev/null 2>&1 && stale_ref="yes"
+
+  local out
+  out=$(run_sut "$w" "$w/targets" -b gone -- bash -c 'echo changed > file.txt')
+  local subject
+  subject=$(remote_subject "$w" stale gone)
+  rm -rf "$w"
+
+  assert_equals       "fixture leaves a stale ref" "yes" "$stale_ref"
+  assert_not_contains "does not skip"              "$out" "already exists"
+  assert_contains     "opens the PR"               "$out" "✅ stale PR created"
+  assert_contains     "pushes the branch"          "$subject" "bash -c echo changed > file.txt"
 }
 
 test_non_main_default_branch() {
@@ -951,6 +999,8 @@ main() {
   test_skips_non_github_remotes
   test_skips_dirty_target
   test_skips_existing_branch
+  test_skips_branch_existing_on_origin
+  test_stale_remote_branch_is_pruned
   test_non_main_default_branch
   test_branch_deleted_on_push_failure
   test_cleanup_after_success

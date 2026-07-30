@@ -84,10 +84,10 @@ func runCommand(cfg *config, repoPath string, r *repoResult, c *capture) bool {
 		r.skip("working tree not clean")
 		return true
 	}
-	if branchExists(repoPath, cfg.branch) {
-		r.skip(fmt.Sprintf("branch '%s' already exists", cfg.branch))
-		return true
-	}
+	// Fetch before any decision that reads a ref. --prune here is what clears
+	// refs/remotes/origin/<branch> after a PR is merged and its branch deleted
+	// upstream; checking first would skip the repo on a ref that is only stale.
+	fetchOrigin(repoPath, repoName, c)
 
 	dflt, ok := defaultBranch(repoPath)
 	if !ok {
@@ -95,7 +95,11 @@ func runCommand(cfg *config, repoPath string, r *repoResult, c *capture) bool {
 		return true
 	}
 
-	fetchOrigin(repoPath, repoName, c)
+	if where := branchLocation(repoPath, cfg.branch); where != "" {
+		r.skip(fmt.Sprintf("branch '%s' already exists %s", cfg.branch, where))
+		return true
+	}
+
 	base := resolveBase(repoPath, dflt)
 	abs := resolvePath(repoPath)
 

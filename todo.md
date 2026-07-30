@@ -2,7 +2,8 @@
 
 Items left from the design review. The top 5 footguns (dirty-tree check,
 fetch-before-branch, default-branch detection, existing-branch handling,
-push-failure cleanup) are done.
+push-failure cleanup) are done — though "fetch-before-branch" was only true in
+the sense that a fetch existed; it ran *after* the branch check until #3.
 
 Formerly `git-patch-apply.sh`, then `mkprs.sh`. The patch-specific design was
 replaced with "run an arbitrary command in each repo"; the items that only made
@@ -31,9 +32,41 @@ same one that verified the port.
 - Allow `-r alice,bob` (already passes through if comma-separated — verify, document).
 - Add `--label`, `--assignee`, `--milestone`, `--draft` passthrough flags.
 
+### 3. Stale remote-tracking refs caused phantom "branch already exists" skips ✅ DONE
+
+Merge the PRs from a run, let GitHub delete the branches, then run again with the
+same `-b` name and every repo skipped:
+
+```
+⏭️  mkprs-test1 skipped: branch 'create_license' already exists
+⏭️  mkprs-test2 skipped: branch 'create_license' already exists
+```
+
+The branch existed nowhere — not locally (`cleanupBranch` deletes it), not on
+origin (GitHub deleted it on merge). What existed was the remote-tracking ref
+`refs/remotes/origin/<branch>`, which survives until something prunes it.
+`runCommand` checked the branch *before* calling `fetchOrigin`, whose `--prune`
+was the very thing that would have cleared the ref.
+
+- Move `fetchOrigin` above both `defaultBranch` and the branch check, so every
+  decision reads refs that were just refreshed. `isCleanTree` stays first, so a
+  dirty repo still skips without touching the network.
+- A clean repo that is about to skip for branch-exists now pays a fetch. That is
+  unavoidable — the remote's state cannot be known without asking — and its
+  output lands in the repo's `--log` file, which is an improvement.
+- `fetchOrigin` remains non-fatal: offline it warns and falls back to local refs,
+  so a stale skip is still possible with no network. Accepted tradeoff.
+- `branchExists` became `branchLocation`, returning *where* the branch was found,
+  so the skip reads `already exists locally` or `already exists on origin`. The
+  local case is the one reordering cannot fix — a run killed mid-flight (or, once
+  #8 lands, `--keep-branch`) leaves a local branch that otherwise skips forever
+  with no hint why.
+- `test_stale_remote_branch_is_pruned` pins the regression; it fails against the
+  pre-fix binary. `test_skips_branch_existing_on_origin` covers the split message.
+
 ## Output & logging
 
-### 3. Clean default output — one line per repo ✅ DONE
+### 4. Clean default output — one line per repo ✅ DONE
 
 Today every repo prints a `=== Processing: X ===` banner, the command's own
 stdout/stderr streams straight through uncaptured, and `[SUCCESS] Created PR for
@@ -65,7 +98,7 @@ Target:
   file as it does on a terminal and there is no TTY/`NO_COLOR` branch to test.
 - `print_summary` stays as the closing tally.
 
-### 4. `--log <dir>` for verbose logs and an audit trail ✅ DONE
+### 5. `--log <dir>` for verbose logs and an audit trail ✅ DONE
 
 When a 30-repo run goes sideways you want to know which repo got which SHA, which
 PR URL, which failure — and to read the full output that the default view elides.
@@ -78,7 +111,7 @@ PR URL, which failure — and to read the full output that the default view elid
 ```
 
 - `<repo>.log` — everything: the resolved command, its full output, git and gh
-  output, the outcome. This is the temp-file capture from #3 written to a real
+  output, the outcome. This is the temp-file capture from #4 written to a real
   path instead of discarded.
 - `summary.tsv` — one tab-separated record per repo:
   `repo_path<TAB>status<TAB>branch<TAB>commit_sha<TAB>pr_url<TAB>notes`.
@@ -89,7 +122,7 @@ PR URL, which failure — and to read the full output that the default view elid
 - Watch the basename collision: two repos with the same directory name under
   different targets would clobber each other's `.log`. Suffix on conflict.
 
-### 5. `--verbose` ✅ DONE
+### 6. `--verbose` ✅ DONE
 
 Streams command output live, prefixed with the repo name, instead of buffering it:
 
@@ -100,30 +133,30 @@ Streams command output live, prefixed with the repo name, instead of buffering i
 ```
 
 - Composes with `--log` — stream *and* write.
-- Interleaves unreadably once #6 runs repos in parallel. That's expected, and is
+- Interleaves unreadably once #7 runs repos in parallel. That's expected, and is
   the reason this is a flag rather than the default.
 
 ## Scale & operability
 
-### 6. Serial execution
+### 7. Serial execution
 
 Across N repos with network round-trips this is painfully slow.
 
 - `golang.org/x/sync/errgroup` with `SetLimit(N)` over `processRepo`, exposed as
   `-j/--jobs <N>`. This is the item that motivated leaving bash.
-- Depends on #3: per-repo output capture is a prerequisite, since live
+- Depends on #4: per-repo output capture is a prerequisite, since live
   interleaved stderr is unreadable at more than one job. `capture` already
   buffers per repo, so results stay coherent; only `--verbose` interleaves.
 - Result lines must be emitted from a single goroutine to stay one-per-line.
 
-### 7. `--keep-branch` / `--no-cleanup`
+### 8. `--keep-branch` / `--no-cleanup`
 
 `cleanupBranch` always deletes the local branch after the PR is opened.
 Sometimes you want it for follow-up edits.
 
 - Add `--keep-branch` to skip the `git branch -D` step.
 
-### 8. Preview mode
+### 9. Preview mode
 
 `--dry-run` was removed along with patching: without a patch to test-apply there
 was nothing meaningful to preview short of running the command.
@@ -134,7 +167,7 @@ was nothing meaningful to preview short of running the command.
 - A cheaper `--list` that only prints which repos pass the filters (GitHub
   remote, clean tree, branch free) may cover most of the old `-d` use anyway.
 
-### 9. Per-repo command timeout
+### 10. Per-repo command timeout
 
 One hung command currently stalls an entire 30-repo run with no feedback.
 
@@ -142,14 +175,14 @@ One hung command currently stalls an entire 30-repo run with no feedback.
   treat expiry as a normal per-repo failure.
 - Expose via `--timeout <seconds>`, unset by default.
 
-### 10. `--max-repos` safety limit
+### 11. `--max-repos` safety limit
 
 Easy to point this at `~/repos` and accidentally open 200 PRs.
 
 - Add `--max-repos <N>` (default unlimited or e.g. 25 to be safe).
 - Hard-fail before any work begins if the discovered set exceeds the cap.
 
-### 11. Fail-fast option
+### 12. Fail-fast option
 
 The main loop always continues to the next repo after a failure. When the first
 repo fails because the command itself is wrong, you usually want to stop and fix
@@ -159,7 +192,7 @@ it rather than watch 29 more failures scroll by.
 
 ## Smaller items
 
-### 12. `--tracked-only` staging
+### 13. `--tracked-only` staging
 
 `git add -A` stages everything the command left behind, including new files.
 That is the right default (tools like `dotnet outdated -u` and scaffolders
@@ -194,7 +227,7 @@ create files), but a command that drops build artifacts in a repo with a thin
   returned. In practice the outer repo then skips as "working tree not clean",
   since the nested checkouts are untracked content — but it is still discovered,
   and a run against a large tree can process far more repos than expected. This
-  is the concrete argument for #10 (`--max-repos`).
+  is the concrete argument for #11 (`--max-repos`).
 
   Submodules *are* excluded, because only `.git` *directories* count: a
   submodule's `.git` is a file holding a `gitdir:` pointer. `discoverRepos`

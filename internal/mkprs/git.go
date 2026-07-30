@@ -69,10 +69,20 @@ func defaultBranch(repoPath string) (string, bool) {
 	return "", false
 }
 
-// branchExists reports whether the branch exists locally or on origin.
-func branchExists(repoPath, branch string) bool {
-	return gitOK(repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch) ||
-		gitOK(repoPath, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch)
+// branchLocation reports where the branch already exists -- "locally", "on
+// origin", or "" when it does not exist at all. Local wins when both match.
+//
+// The origin half reads a remote-tracking ref, which is only as fresh as the
+// last fetch: call this after fetchOrigin, or a branch deleted upstream still
+// looks like it exists.
+func branchLocation(repoPath, branch string) string {
+	if gitOK(repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch) {
+		return "locally"
+	}
+	if gitOK(repoPath, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch) {
+		return "on origin"
+	}
+	return ""
 }
 
 // fetchOrigin refreshes origin, reporting into w but never failing the repo:
