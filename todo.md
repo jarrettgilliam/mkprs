@@ -9,20 +9,23 @@ Formerly `git-patch-apply.sh`, then `mkprs.sh`. The patch-specific design was
 replaced with "run an arbitrary command in each repo"; the items that only made
 sense for patching (`--source` selection, patch-hash branch names, `--3way`
 apply) have been dropped rather than carried forward. The bash implementation
-was ported to Go at strict parity and deleted; the suite in `test.sh` is the
-same one that verified the port.
+was ported to Go at strict parity and deleted. `test.sh` — the conformance suite
+that verified that port — has since been replaced by `go test ./...`, and `gh`
+now sits behind the `prOpener` interface so it can be mocked and, later, swapped
+for direct API calls.
 
 ## Implicit-behavior surprises
 
 ### 1. PR base branch is hardcoded to `main`
 
-`createPR` (`internal/mkprs/pr.go`) passes `gh pr create --base main`. Repos with
-`develop`/`trunk`/etc. as their default get the wrong base.
+`processRepo` (`internal/mkprs/run.go`) fills `pullRequest.Base` with the literal
+`"main"`. Repos with `develop`/`trunk`/etc. as their default get the wrong base.
 
-- Reuse `defaultBranch` from the target repo as the default `--base`.
-  `runCommand` already computes it — thread it through to `createPR` rather
-  than recomputing.
+- Reuse `defaultBranch` from the target repo as the default `Base`.
+  `runCommand` already computes it — thread it through rather than recomputing.
 - Add `--pr-base <branch>` flag to override.
+- Now a one-field change: `Base` is already a `pullRequest` field that `ghArgs`
+  passes through, and `TestGhArgs` already covers a non-`main` base.
 
 ### 2. `-r` accepts only one reviewer
 
@@ -31,6 +34,9 @@ same one that verified the port.
 
 - Allow `-r alice,bob` (already passes through if comma-separated — verify, document).
 - Add `--label`, `--assignee`, `--milestone`, `--draft` passthrough flags.
+- These become fields on `pullRequest` plus a line each in `ghArgs`
+  (`internal/mkprs/pr.go`). A REST implementation of `prOpener` would then get
+  them for free rather than needing its own flag plumbing.
 
 ### 3. Stale remote-tracking refs caused phantom "branch already exists" skips ✅ DONE
 
@@ -190,9 +196,87 @@ it rather than watch 29 more failures scroll by.
 
 - Add `--fail-fast` to abort the run on the first per-repo failure.
 
+## Dependencies
+
+### 13. Replace `gh` with direct GitHub API calls
+
+`gh` is the last external binary mkprs needs, which undercuts the reason it was
+written in Go: download one file and run it, on any platform. A user without the
+GitHub CLI gets `'gh' (GitHub CLI) is not installed` and no PRs.
+
+Opening a pull request is one `POST`, so this costs a `net/http` call and an auth
+story — no new dependencies.
+
+**The seam already exists.** `ghCLI` implements `prOpener`
+(`internal/mkprs/pr.go`); a `restAPI` implementing the same interface drops in
+without touching `processRepo`. `TestGhArgs` covers the translation for the CLI
+path, and end-to-end tests inject `fakePR`, so neither needs rewriting.
+
+#### Authentication
+
+**Discover a token in this order**, first hit wins:
+
+1. `GH_TOKEN`, then `GITHUB_TOKEN`. The CI convention, and what `gh` itself reads
+   first. Actions provides `GITHUB_TOKEN` automatically.
+2. `gh auth token` (and `gh auth token --hostname <host>` for Enterprise), if
+   `gh` is on `PATH`. This inherits gh's keyring/`hosts.yml` without
+   reimplementing it, so existing users need no setup — but is a convenience,
+   not a requirement.
+3. `git credential fill`. Write `protocol=https\nhost=<host>\n\n` to stdin and
+   read `password=` back. This reaches the platform credential helper
+   (osxkeychain, wincred, libsecret) that the user's `git push` already relies
+   on.
+4. Otherwise fail with an actionable message naming all three options, rather
+   than a bare 401.
+
+**The token authenticates the API, not `git push`.** This is the sharp edge and
+belongs in the docs. mkprs pushes via `git push`, which uses whatever transport
+`origin` names — an SSH key or a credential helper — and never sees the token.
+So two new failure modes appear that `gh` masked:
+
+- SSH-only user, no token: `push` succeeds, opening the PR fails.
+- Token set, no push credentials: the API works but nothing was pushed to open
+  a PR *from*.
+
+Fetching the token early and failing before any repo is touched is better than
+discovering it after N commits have been pushed.
+
+**Scope**: `repo` for private repos, `public_repo` if only public ones. A
+fine-grained PAT needs *Pull requests: write* plus *Contents: read*.
+
+**Never let the token reach disk or `ps`.** Pass it as an `Authorization` header
+built at call time — not on a command line, and not into the `capture` that
+`--log` writes out. A redaction test is worth having, since the log deliberately
+records everything else.
+
+**Enterprise**: derive the host from `remote.origin.url` rather than hardcoding
+`api.github.com`; GHES lives at `https://<host>/api/v3/`. Note that `originURL`
+already reads the *un-rewritten* config value, which is what makes this parseable.
+
+#### API notes
+
+- `POST /repos/{owner}/{repo}/pulls` with `base`, `head`, `title`, `body`.
+  Response `.html_url` is the line mkprs prints today.
+- Reviewers are a **second** call —
+  `POST /repos/{owner}/{repo}/pulls/{number}/requested_reviewers` — and labels
+  and assignees a third, via the issues API. `gh pr create` hides this behind one
+  invocation, so #2 gets more involved here, and partial failure becomes possible:
+  the PR exists but the reviewer was not added. Prefer reporting success with a
+  warning over failing the repo.
+- `422` usually means a PR already exists for that head. That is a skip, not a
+  failure — better than the current opaque `failed to create PR`.
+- Back off on `403` secondary rate limits and `5xx`; a 30-repo run trips these.
+
+#### Migration
+
+Keep both implementations and choose at startup: token found → `restAPI`; else
+`gh` on `PATH` → `ghCLI`; else fail. Existing users notice nothing, users without
+`gh` start working, and `ghCLI` can be deleted later once the API path has
+proven itself.
+
 ## Smaller items
 
-### 13. `--tracked-only` staging
+### 14. `--tracked-only` staging
 
 `git add -A` stages everything the command left behind, including new files.
 That is the right default (tools like `dotnet outdated -u` and scaffolders
