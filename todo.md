@@ -181,6 +181,17 @@ create files), but a command that drops build artifacts in a repo with a thin
   "missing value for `-b`" check in `parse_args` would be better.
 - **Pre-existing `discover_repos` shellcheck note**: SC2156 was avoided in the
   rewrite — keep the `find ... -prune -print0 | dirname` pattern.
-- **Nested repo discovery**: `find -prune` stops at the first `.git`, so
-  submodules and nested repos are never visited. Probably correct; worth
-  documenting either way.
+- **Nested repo discovery** (corrected — the earlier note here was wrong):
+  nested repositories *are* discovered. `-prune` stops descent into the `.git`
+  directory itself, not into the rest of the tree, so a repo inside another repo
+  is visited and both are processed. Verified against `~/Code`, where
+  `CSharp/TestProjects` is a repo containing 10 nested repos and all 11 are
+  returned. In practice the outer repo then skips as "working tree not clean",
+  since the nested checkouts are untracked content — but it is still discovered,
+  and a run against a large tree can process far more repos than expected. This
+  is the concrete argument for #10 (`--max-repos`).
+
+  Submodules *are* excluded, but because of `-type d`, not `-prune`: a
+  submodule's `.git` is a file holding a `gitdir:` pointer, not a directory.
+  The Go port reproduces both halves and `test_discovers_nested_repos` pins
+  them.

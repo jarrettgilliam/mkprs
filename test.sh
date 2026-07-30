@@ -2,7 +2,11 @@
 set -euo pipefail
 
 # =============================================================================
-# Tests for mkprs.sh
+# Tests for mkprs
+#
+# Builds the binary, then drives it as a black box. These same assertions ran
+# against the original mkprs.sh, which is what makes them a port conformance
+# check rather than just a test suite.
 #
 # Fixtures use real local bare repos wired up through url.<...>.insteadOf, so
 # fetch and push genuinely work while the origin URL still looks like GitHub.
@@ -10,7 +14,7 @@ set -euo pipefail
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SUT="$SCRIPT_DIR/mkprs.sh"
+SUT="$SCRIPT_DIR/mkprs"
 
 PASS=0
 FAIL=0
@@ -127,10 +131,10 @@ new_workspace() {
   printf '%s' "$workdir"
 }
 
-# run_sut <workdir> <args...> -- runs mkprs.sh with the fake gh on PATH.
+# run_sut <workdir> <args...> -- runs mkprs with the fake gh on PATH.
 run_sut() {
   local workdir="$1"; shift
-  PATH="$workdir/bin:$PATH" bash "$SUT" "$@" 2>&1
+  PATH="$workdir/bin:$PATH" "$SUT" "$@" 2>&1
 }
 
 gh_log() {
@@ -163,16 +167,16 @@ current_branch() {
 test_help() {
   echo "test_help:"
   local out rc
-  out=$(bash "$SUT" --help 2>&1) && rc=0 || rc=$?
+  out=$("$SUT" --help 2>&1) && rc=0 || rc=$?
   assert_exit_code "exits 0" 0 "$rc"
-  assert_contains "prints usage" "$out" "Usage: mkprs.sh"
+  assert_contains "prints usage" "$out" "Usage: mkprs"
   assert_contains "documents the -- separator" "$out" "Everything after -- is the command"
 }
 
 test_missing_target_dirs() {
   echo "test_missing_target_dirs:"
   local out rc
-  out=$(bash "$SUT" -b some-branch -- true 2>&1) && rc=0 || rc=$?
+  out=$("$SUT" -b some-branch -- true 2>&1) && rc=0 || rc=$?
   assert_exit_code "exits non-zero" 1 "$rc"
   assert_contains "errors with helpful message" "$out" "Must specify at least one target dir"
 }
@@ -180,7 +184,7 @@ test_missing_target_dirs() {
 test_missing_branch() {
   echo "test_missing_branch:"
   local out rc
-  out=$(bash "$SUT" /tmp -- true 2>&1) && rc=0 || rc=$?
+  out=$("$SUT" /tmp -- true 2>&1) && rc=0 || rc=$?
   assert_exit_code "exits non-zero" 1 "$rc"
   assert_contains "demands a branch" "$out" "-b/--branch is required"
 }
@@ -188,7 +192,7 @@ test_missing_branch() {
 test_missing_command() {
   echo "test_missing_command:"
   local out rc
-  out=$(bash "$SUT" /tmp -b some-branch 2>&1) && rc=0 || rc=$?
+  out=$("$SUT" /tmp -b some-branch 2>&1) && rc=0 || rc=$?
   assert_exit_code "exits non-zero" 1 "$rc"
   assert_contains "demands a command" "$out" "no command specified"
 }
@@ -196,7 +200,7 @@ test_missing_command() {
 test_empty_command_after_separator() {
   echo "test_empty_command_after_separator:"
   local out rc
-  out=$(bash "$SUT" /tmp -b some-branch -- 2>&1) && rc=0 || rc=$?
+  out=$("$SUT" /tmp -b some-branch -- 2>&1) && rc=0 || rc=$?
   assert_exit_code "exits non-zero" 1 "$rc"
   assert_contains "treats bare -- as no command" "$out" "no command specified"
 }
@@ -204,9 +208,9 @@ test_empty_command_after_separator() {
 test_unknown_option() {
   echo "test_unknown_option:"
   local out rc
-  out=$(bash "$SUT" --bogus 2>&1) && rc=0 || rc=$?
+  out=$("$SUT" --bogus 2>&1) && rc=0 || rc=$?
   assert_exit_code "exits non-zero" 1 "$rc"
-  assert_contains "reports unknown option" "$out" "Unknown option"
+  assert_contains "reports unknown option" "$out" "unknown flag"
 }
 
 test_option_like_args_after_separator() {
@@ -866,20 +870,55 @@ test_short_option_space_form() {
   echo "test_short_option_space_form:"
   local w
   w=$(new_workspace)
-  local out
-  out=$(PATH="$w/bin:$PATH" bash -x "$SUT" "$w/targets" -b my-space-branch -- true 2>&1)
+  make_repo "$w" "$w/targets/spaceform" "spaceform" "git@github.com:fake/spaceform.git"
+
+  run_sut "$w" "$w/targets" -b my-space-branch -- bash -c 'echo changed > file.txt' >/dev/null
+  local log pushed="no"
+  log=$(gh_log "$w")
+  remote_has_branch "$w" "spaceform" "my-space-branch" && pushed="yes"
   rm -rf "$w"
-  assert_contains "assigns value from space form" "$out" "BRANCH_NAME=my-space-branch"
+
+  assert_contains "assigns value from space form" "$log" "--head my-space-branch"
+  assert_equals   "pushes that branch"            "yes" "$pushed"
 }
 
 test_short_option_equals_form() {
   echo "test_short_option_equals_form:"
   local w
   w=$(new_workspace)
-  local out
-  out=$(PATH="$w/bin:$PATH" bash -x "$SUT" "$w/targets" -b=my-eq-branch -- true 2>&1)
+  make_repo "$w" "$w/targets/eqform" "eqform" "git@github.com:fake/eqform.git"
+
+  run_sut "$w" "$w/targets" -b=my-eq-branch -- bash -c 'echo changed > file.txt' >/dev/null
+  local log pushed="no"
+  log=$(gh_log "$w")
+  remote_has_branch "$w" "eqform" "my-eq-branch" && pushed="yes"
   rm -rf "$w"
-  assert_contains "assigns value from equals form" "$out" "BRANCH_NAME=my-eq-branch"
+
+  assert_contains "assigns value from equals form" "$log" "--head my-eq-branch"
+  assert_equals   "pushes that branch"             "yes" "$pushed"
+}
+
+# Discovery matches `find -type d -name .git -prune`: a repo nested inside
+# another repo is still found, while a submodule-style .git *file* is not.
+test_discovers_nested_repos() {
+  echo "test_discovers_nested_repos:"
+  local w
+  w=$(new_workspace)
+  make_repo "$w" "$w/targets/outer" "outer" "git@github.com:fake/outer.git"
+  make_repo "$w" "$w/targets/outer/inner" "inner" "git@github.com:fake/inner.git"
+  # A submodule records its git dir in a file, not a directory.
+  mkdir -p "$w/targets/outer/submod"
+  printf 'gitdir: ../../nowhere\n' > "$w/targets/outer/submod/.git"
+
+  local out
+  out=$(run_sut "$w" "$w/targets" -b nested -- bash -c 'echo changed > file.txt')
+  rm -rf "$w"
+
+  # The outer repo is discovered too, then skipped: the nested directories are
+  # untracked content in its working tree.
+  assert_contains     "finds the outer repo"  "$out" "⏭️  outer skipped: working tree not clean"
+  assert_contains     "finds the nested repo" "$out" "✅ inner"
+  assert_not_contains "ignores .git files"    "$out" "submod"
 }
 
 # =============================================================================
@@ -887,8 +926,8 @@ test_short_option_equals_form() {
 # =============================================================================
 
 main() {
-  if [[ ! -f "$SUT" ]]; then
-    echo "Error: cannot find $SUT" >&2
+  if ! (cd "$SCRIPT_DIR" && go build -o "$SUT" .); then
+    echo "Error: build failed" >&2
     exit 2
   fi
 
@@ -937,6 +976,7 @@ main() {
   test_quiet_is_the_default
   test_short_option_space_form
   test_short_option_equals_form
+  test_discovers_nested_repos
 
   echo
   echo "===================="
