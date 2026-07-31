@@ -16,16 +16,21 @@ for direct API calls.
 
 ## Implicit-behavior surprises
 
-### 1. PR base branch is hardcoded to `main`
+### 1. PR base branch is hardcoded to `main` ✅ DONE
 
-`processRepo` (`internal/mkprs/run.go`) fills `pullRequest.Base` with the literal
-`"main"`. Repos with `develop`/`trunk`/etc. as their default get the wrong base.
+`openPR` filled `pullRequest.Base` with the literal `"main"`, so repos with
+`develop`/`trunk`/etc. as their default got a base branch they may not even have.
 
-- Reuse `defaultBranch` from the target repo as the default `Base`.
-  `runCommand` already computes it — thread it through rather than recomputing.
-- Add `--pr-base <branch>` flag to override.
-- Now a one-field change: `Base` is already a `pullRequest` field that `ghArgs`
-  passes through, and `TestGhArgs` already covers a non-`main` base.
+- `attemptRunCommand` already resolves the repo's default branch (`getDefaultBranch`,
+  origin/HEAD with main/master fallbacks) to cut the working branch from. That
+  value is now threaded into `openPR` as `base` rather than recomputed, which
+  also guarantees the base and the fork point agree — so the PR's diff is exactly
+  the commit the run just made.
+- **No `--pr-base` override.** PRs open against the default branch, full stop;
+  an override would let the base and the fork point disagree, and there is no
+  use case for it yet.
+- `TestRunPullRequestFields/base is the repo's own default branch` pins it against
+  a fixture whose default is `develop`; it fails against the hardcoded version.
 
 ### 2. `-r` accepts only one reviewer
 

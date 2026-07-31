@@ -233,9 +233,16 @@ func (f *fixture) repo(name string) string {
 // URLs get a working local remote; others exist to be skipped.
 func (f *fixture) repoWithRemote(name, remote string) string {
 	f.t.Helper()
+	return f.repoOn(name, "main", remote)
+}
+
+// repoOn is repoWithRemote with the default branch named explicitly, for the
+// repos that are not on main.
+func (f *fixture) repoOn(name, defaultBranch, remote string) string {
+	f.t.Helper()
 
 	path := filepath.Join(f.targets, name)
-	gitCmd(f.t, "", "init", "-q", "-b", "main", path)
+	gitCmd(f.t, "", "init", "-q", "-b", defaultBranch, path)
 	writeFile(f.t, filepath.Join(path, "file.txt"), "hello\n")
 	gitCmd(f.t, path, "add", "file.txt")
 	gitCmd(f.t, path, "commit", "-q", "-m", "initial commit")
@@ -249,8 +256,8 @@ func (f *fixture) repoWithRemote(name, remote string) string {
 		bare := filepath.Join(f.remotes, name+".git")
 		gitCmd(f.t, "", "init", "-q", "--bare", bare)
 		gitCmd(f.t, path, "config", "url."+fileURL(bare)+".insteadOf", remote)
-		gitCmd(f.t, path, "push", "-q", "-u", "origin", "main")
-		gitCmd(f.t, path, "remote", "set-head", "origin", "main")
+		gitCmd(f.t, path, "push", "-q", "-u", "origin", defaultBranch)
+		gitCmd(f.t, path, "remote", "set-head", "origin", defaultBranch)
 	}
 	return path
 }

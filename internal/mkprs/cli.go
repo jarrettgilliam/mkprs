@@ -48,6 +48,9 @@ A repo is skipped when its working tree is dirty, the branch already exists, the
 command leaves no changes behind, or its origin remote does not point at
 github.com.
 
+Each repo's branch is cut from, and its PR opened against, that repo's own
+default branch -- origin/HEAD, falling back to main and then master.
+
 Output is one line per repo: ✅ and the PR URL on success, ❌ and the reason on
 failure (followed by the tail of the command's output), ⏭️ when the repo was
 skipped. Command output is otherwise captured and discarded.

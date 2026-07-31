@@ -101,6 +101,31 @@ func TestRunPullRequestFields(t *testing.T) {
 			t.Errorf("pullRequest = %+v, want %+v", got, want)
 		}
 	})
+
+	// The base follows the repo rather than a hardcoded "main": a PR against a
+	// branch the repo does not have would be rejected by GitHub outright.
+	t.Run("base is the repo's own default branch", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repoOn("x", "master", "git@github.com:fake/x.git")
+		prs := &fakePR{}
+
+		run(t, prs, []string{f.targets, "-b", "b", "-m", "msg"}, helperCmd(t, "write", "file.txt", "x")...)
+
+		if got, want := prs.only(t).pr.Base, "master"; got != want {
+			t.Errorf("base = %q, want %q", got, want)
+		}
+
+		// And the branch was cut from master, so the PR's diff is just this
+		// commit -- the base and the fork point have to agree.
+		if got := currentBranch(t, repo); got != "master" {
+			t.Errorf("left on branch %q, want master", got)
+		}
+		if got, want := f.remoteFile("x", "b", "file.txt"), "x"; got != want {
+			t.Errorf("pushed file = %q, want %q", got, want)
+		}
+	})
 }
 
 // The command sees the repo as its working directory, its path via {} and

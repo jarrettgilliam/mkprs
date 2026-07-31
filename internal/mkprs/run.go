@@ -54,14 +54,15 @@ func (a *app) processRepo(repoPath string, c *capture) *repoResult {
 }
 
 // openPR is the last step, and can end only two ways.
-func (a *app) openPR(repoPath string, r *repoResult, c *capture) outcome {
+//
+// base is the repo's own default branch, the same one the working branch was
+// cut from -- so the PR's diff is exactly the commit this run just made.
+func (a *app) openPR(repoPath, base string, r *repoResult, c *capture) outcome {
 	// Read the SHA while the branch still exists; cleanup deletes it after.
 	r.commitSHA = shortSHA(repoPath, a.cfg.branch)
 
-	// The base is still hardcoded to main, matching the shell version; making it
-	// follow the repo's default branch is tracked separately.
 	url, err := a.prs.open(repoPath, pullRequest{
-		Base:     "main",
+		Base:     base,
 		Head:     a.cfg.branch,
 		Title:    a.cfg.title,
 		Body:     a.cfg.body,
@@ -152,7 +153,7 @@ func (a *app) attemptRunCommand(repoPath string, r *repoResult, c *capture) outc
 		return fail(fmt.Sprintf("unable to push to origin/%s", cfg.branch))
 	}
 
-	return a.openPR(repoPath, r, c)
+	return a.openPR(repoPath, defaultBranch, r, c)
 }
 
 // resolvePath mirrors realpath: absolute, with symlinks resolved. This matters
