@@ -102,6 +102,30 @@ func resolveBase(repoPath, dflt string) string {
 	return dflt
 }
 
+// headBranch is the checked-out branch, and whether HEAD is on a branch at all.
+// symbolic-ref fails on a detached HEAD, which is the distinction callers need.
+func headBranch(repoPath string) (string, bool) {
+	name, err := git(repoPath, "symbolic-ref", "--short", "HEAD")
+	if err != nil || name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+// branchAhead reports whether branch carries commits that base does not, and
+// whether the question could be answered at all.
+//
+// This is what decides that a repo has something to open a PR for. A commit the
+// command made itself counts exactly as much as one mkprs made, which is why
+// this asks about the branch rather than about the index.
+func branchAhead(repoPath, base, branch string) (ahead, ok bool) {
+	out, err := git(repoPath, "rev-list", "--count", base+".."+branch)
+	if err != nil {
+		return false, false
+	}
+	return out != "0", true
+}
+
 // restoreRepo abandons the working branch and returns the repo to dflt.
 func restoreRepo(repoPath, dflt, branch string, w io.Writer) {
 	_ = gitTo(repoPath, w, "checkout", dflt, "--quiet")

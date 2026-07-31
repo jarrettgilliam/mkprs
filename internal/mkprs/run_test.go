@@ -213,6 +213,250 @@ func TestRunStagesEveryChange(t *testing.T) {
 	})
 }
 
+// Regression: a command is allowed to commit its own work. Deciding "did
+// anything happen?" from the index read that as a no-op skip, and the deferred
+// restoreRepo then deleted the branch the commit was on.
+func TestRunCommandThatCommitsItsOwnWork(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the commit survives and a PR is opened", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "gitcommit", "file.txt", "by the command")...)
+
+		if got.code != exitOK {
+			t.Errorf("exit code = %d, want %d", got.code, exitOK)
+		}
+		if !f.remoteHasBranch("x", "b") {
+			t.Fatalf("the command's commit was discarded:\n%s", got.all())
+		}
+		if got, want := f.remoteFile("x", "b", "file.txt"), "by the command"; got != want {
+			t.Errorf("pushed file = %q, want %q", got, want)
+		}
+		if len(prs.calls) != 1 {
+			t.Errorf("opened %d PRs, want 1", len(prs.calls))
+		}
+		if got := currentBranch(t, repo); got != "main" {
+			t.Errorf("left on branch %q, want main", got)
+		}
+	})
+
+	// Guards against a fix that reaches for --allow-empty: with nothing staged
+	// there is nothing for mkprs to commit, so the command's own commit is the
+	// only one on the branch.
+	t.Run("mkprs does not add a commit of its own", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("x")
+		prs := &fakePR{}
+
+		run(t, prs, []string{f.targets, "-b", "b", "-m", "mkprs message"}, helperCmd(t, "gitcommit", "file.txt", "by the command")...)
+
+		if got, want := f.remoteSubject("x", "b"), "committed by the command"; got != want {
+			t.Errorf("commit subject = %q, want %q", got, want)
+		}
+		if got, want := commitCount(t, f.bare("x"), "b"), 2; got != want {
+			t.Errorf("branch has %d commits, want %d", got, want)
+		}
+	})
+
+	// Staging still runs: whatever the command left uncommitted is mkprs's to
+	// commit, on top of the command's own.
+	t.Run("a command that commits and dirties the tree lands both", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("x")
+		prs := &fakePR{}
+
+		run(t, prs, []string{f.targets, "-b", "b", "-m", "mkprs message"},
+			helperCmd(t, "gitcommit", "committed.txt", "by the command", "leftover.txt")...)
+
+		if got, want := f.remoteFile("x", "b", "committed.txt"), "by the command"; got != want {
+			t.Errorf("command's file = %q, want %q", got, want)
+		}
+		if got, want := f.remoteFile("x", "b", "leftover.txt"), "left behind"; got != want {
+			t.Errorf("leftover file = %q, want %q", got, want)
+		}
+		if got, want := f.remoteSubject("x", "b"), "mkprs message"; got != want {
+			t.Errorf("commit subject = %q, want %q", got, want)
+		}
+	})
+}
+
+// mkprs cuts its branch from the repo's default branch and returns there when it
+// is done, so it only runs on a repo that started there. Anything else is a
+// normal state of a repo, not a failure.
+func TestRunRequiresDefaultBranch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("on a feature branch", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		gitCmd(t, repo, "checkout", "-q", "-b", "feature")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if got.code != exitOK {
+			t.Errorf("exit code = %d, want %d", got.code, exitOK)
+		}
+		if want := "not on the default branch (on 'feature', want 'main')"; !strings.Contains(got.stdout, want) {
+			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
+		}
+		if len(prs.calls) != 0 {
+			t.Errorf("opened %d PRs, want none", len(prs.calls))
+		}
+		// Left where it was found -- the reason the check exists.
+		if got := currentBranch(t, repo); got != "feature" {
+			t.Errorf("left on branch %q, want feature", got)
+		}
+	})
+
+	t.Run("detached HEAD", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		gitCmd(t, repo, "checkout", "-q", "--detach")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if want := "not on a branch"; !strings.Contains(got.stdout, want) {
+			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
+		}
+		if len(prs.calls) != 0 {
+			t.Errorf("opened %d PRs, want none", len(prs.calls))
+		}
+	})
+}
+
+// A command is free to move HEAD -- `git checkout -b per-repo-name`, or a bare
+// `git checkout my-feature` over work done by hand earlier. mkprs follows it,
+// opens the PR from it, and never deletes a branch it did not create itself.
+func TestRunFollowsTheCommandsBranch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a branch the command creates and commits to", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "b"},
+			helperCmd(t, "gitcheckout", "other", "file.txt", "by the command")...)
+
+		if got.code != exitOK {
+			t.Errorf("exit code = %d, want %d\n%s", got.code, exitOK, got.all())
+		}
+		if !f.remoteHasBranch("x", "other") {
+			t.Fatalf("the command's branch was not pushed:\n%s", got.all())
+		}
+		call := prs.only(t)
+		if call.pr.Head != "other" {
+			t.Errorf("PR head = %q, want other", call.pr.Head)
+		}
+		if call.pr.Base != "main" {
+			t.Errorf("PR base = %q, want main", call.pr.Base)
+		}
+		// The command's branch is the user's; only mkprs's own is cleaned up.
+		if !localHasBranch(t, repo, "other") {
+			t.Error("the command's branch was deleted, it should survive")
+		}
+		if localHasBranch(t, repo, "b") {
+			t.Error("mkprs's own branch should have been deleted")
+		}
+		if got := currentBranch(t, repo); got != "main" {
+			t.Errorf("left on branch %q, want main", got)
+		}
+	})
+
+	t.Run("a branch the command creates and leaves dirty", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("x")
+		prs := &fakePR{}
+
+		run(t, prs, []string{f.targets, "-b", "b", "-m", "mkprs message"},
+			helperCmd(t, "gitcheckout", "other", "committed.txt", "by the command", "leftover.txt")...)
+
+		if got, want := f.remoteFile("x", "other", "leftover.txt"), "left behind"; got != want {
+			t.Errorf("leftover file = %q, want %q", got, want)
+		}
+		if got, want := f.remoteSubject("x", "other"), "mkprs message"; got != want {
+			t.Errorf("commit subject = %q, want %q", got, want)
+		}
+	})
+
+	// The "manual work already done, now automate the PR" case: the command is
+	// nothing but a checkout, and the commits were made by hand earlier.
+	t.Run("a pre-existing branch already ahead of the default", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		gitCmd(t, repo, "checkout", "-q", "-b", "by-hand")
+		writeFile(t, filepath.Join(repo, "file.txt"), "done by hand\n")
+		gitCmd(t, repo, "commit", "-q", "-a", "-m", "hand-written work")
+		gitCmd(t, repo, "checkout", "-q", "main")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "gitcheckout", "by-hand")...)
+
+		if got.code != exitOK {
+			t.Errorf("exit code = %d, want %d\n%s", got.code, exitOK, got.all())
+		}
+		call := prs.only(t)
+		if call.pr.Head != "by-hand" || call.pr.Base != "main" {
+			t.Errorf("PR = %+v, want head by-hand onto main", call.pr)
+		}
+		if got, want := f.remoteSubject("x", "by-hand"), "hand-written work"; got != want {
+			t.Errorf("pushed subject = %q, want %q", got, want)
+		}
+		if !localHasBranch(t, repo, "by-hand") {
+			t.Error("a branch mkprs did not create must never be deleted")
+		}
+	})
+
+	// Safety: without this guard the run would commit to the default branch and
+	// push it, bypassing review entirely.
+	t.Run("the default branch is refused", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("x")
+		before := f.remoteSubject("x", "main")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "b"},
+			helperCmd(t, "gitcheckout", "main", "file.txt", "sneaky")...)
+
+		// One repo failing is not fatal to the run; the ❌ line carries it.
+		if got.code != exitOK {
+			t.Errorf("exit code = %d, want %d", got.code, exitOK)
+		}
+		if want := "a PR needs a branch to open from"; !strings.Contains(got.stdout, want) {
+			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
+		}
+		if len(prs.calls) != 0 {
+			t.Errorf("opened %d PRs, want none", len(prs.calls))
+		}
+		if got := f.remoteSubject("x", "main"); got != before {
+			t.Errorf("origin/main moved to %q, want it untouched at %q", got, before)
+		}
+	})
+}
+
 // Skips are normal outcomes, not errors: the run still exits 0.
 func TestRunSkips(t *testing.T) {
 	t.Parallel()

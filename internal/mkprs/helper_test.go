@@ -122,6 +122,55 @@ func runHelper(args []string) int {
 		fmt.Println(strings.Join(rest[1:], " "))
 		return 0
 
+	// gitcommit <file> <content> [leftover] -- a command that commits its own
+	// work, optionally leaving an uncommitted file behind afterwards. Its cwd is
+	// already the repo, and it inherits the pinned GIT_* identity.
+	case "gitcommit":
+		if code := writeLines(rest[0], rest[1]); code != 0 {
+			return code
+		}
+		for _, args := range [][]string{
+			{"add", "-A"},
+			{"commit", "-q", "-m", "committed by the command"},
+		} {
+			if code := helperGit(args...); code != 0 {
+				return code
+			}
+		}
+		if len(rest) > 2 {
+			return writeLines(rest[2], "left behind")
+		}
+		return 0
+
+	// gitcheckout <branch> [file content [leftover]] -- switches to branch,
+	// creating it if it does not exist, and optionally commits a file there
+	// and/or leaves one uncommitted behind.
+	case "gitcheckout":
+		checkout := []string{"checkout", "-q", rest[0]}
+		if !helperGitOK("rev-parse", "--verify", "--quiet", "refs/heads/"+rest[0]) {
+			checkout = []string{"checkout", "-q", "-b", rest[0]}
+		}
+		if code := helperGit(checkout...); code != 0 {
+			return code
+		}
+		if len(rest) >= 3 {
+			if code := writeLines(rest[1], rest[2]); code != 0 {
+				return code
+			}
+			for _, args := range [][]string{
+				{"add", "-A"},
+				{"commit", "-q", "-m", "committed by the command"},
+			} {
+				if code := helperGit(args...); code != 0 {
+					return code
+				}
+			}
+		}
+		if len(rest) >= 4 {
+			return writeLines(rest[3], "left behind")
+		}
+		return 0
+
 	case "rm":
 		if err := os.Remove(rest[0]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -187,6 +236,23 @@ func runHelper(args []string) int {
 		fmt.Fprintf(os.Stderr, "helper: unknown mode %q\n", mode)
 		return 2
 	}
+}
+
+// helperGit runs git in the helper's cwd -- the repo -- returning a shell-style
+// status. The helper stands in for a user's command, so it drives git itself
+// rather than going through the package's own helpers.
+func helperGit(args ...string) int {
+	cmd := exec.Command("git", args...)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func helperGitOK(args ...string) bool {
+	return exec.Command("git", args...).Run() == nil
 }
 
 func writeLines(path string, lines ...string) int {
@@ -342,6 +408,15 @@ func localHasBranch(t *testing.T, repo, branch string) bool {
 	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	cmd.Dir = repo
 	return cmd.Run() == nil
+}
+
+func commitCount(t *testing.T, repo, rev string) int {
+	t.Helper()
+	n, err := strconv.Atoi(gitCmd(t, repo, "rev-list", "--count", rev))
+	if err != nil {
+		t.Fatalf("rev-list --count %s: %v", rev, err)
+	}
+	return n
 }
 
 func currentBranch(t *testing.T, repo string) string {

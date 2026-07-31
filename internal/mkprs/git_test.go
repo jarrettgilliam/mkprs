@@ -189,6 +189,84 @@ func TestResolveBase(t *testing.T) {
 	})
 }
 
+func TestHeadBranch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("on a branch", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		name, ok := headBranch(f.repo("x"))
+		if !ok || name != "main" {
+			t.Errorf("headBranch = %q, %v, want main, true", name, ok)
+		}
+	})
+
+	// A detached HEAD is not a branch, and callers have to be able to tell.
+	t.Run("detached HEAD", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		gitCmd(t, repo, "checkout", "-q", "--detach")
+
+		if name, ok := headBranch(repo); ok {
+			t.Errorf("headBranch = %q, true; want ok false when detached", name)
+		}
+	})
+}
+
+// Whether a repo has anything to open a PR for is decided by the branch, not
+// the index, so that a commit the command made itself still counts.
+func TestBranchAhead(t *testing.T) {
+	t.Parallel()
+
+	t.Run("branch with a commit of its own", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		gitCmd(t, repo, "checkout", "-q", "-b", "work")
+		writeFile(t, filepath.Join(repo, "file.txt"), "changed\n")
+		gitCmd(t, repo, "commit", "-q", "-a", "-m", "work")
+
+		ahead, ok := branchAhead(repo, "main", "work")
+		if !ok {
+			t.Fatal("branchAhead could not answer")
+		}
+		if !ahead {
+			t.Error("ahead = false, want true")
+		}
+	})
+
+	t.Run("branch level with its base", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		gitCmd(t, repo, "checkout", "-q", "-b", "work")
+
+		ahead, ok := branchAhead(repo, "main", "work")
+		if !ok {
+			t.Fatal("branchAhead could not answer")
+		}
+		if ahead {
+			t.Error("ahead = true, want false")
+		}
+	})
+
+	// An unanswerable question must not look like "nothing happened": that path
+	// skips the repo, and skipping deletes the branch.
+	t.Run("unknown ref cannot be answered", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		if _, ok := branchAhead(f.repo("x"), "main", "no-such-branch"); ok {
+			t.Error("ok = true, want false for a ref that does not exist")
+		}
+	})
+}
+
 // fetchOrigin prunes, which is what clears a remote-tracking ref after the
 // branch is deleted upstream. See TestStaleRemoteBranchIsPruned for why.
 func TestFetchOriginPrunes(t *testing.T) {

@@ -29,26 +29,6 @@ Entries are unnumbered so nothing has to be renumbered as they come and go.
 
 ## Scale & operability
 
-- **Bug: a command that commits its own work has that work deleted.** Live
-  today, no `-i` required. `attemptRunCommand` stages with `git add -A`, then
-  treats an empty index as "nothing happened":
-
-  ```go
-  if gitOK(repoPath, "diff", "--cached", "--quiet") {
-      return skip("command made no changes")
-  }
-  ```
-
-  A command that runs `git commit` itself leaves a clean tree and an empty
-  index, so this reads as a no-op skip — and the `defer restoreRepo` then runs
-  `git branch -D`, discarding the commit. `-- bash -c '... && git commit -m x'`
-  is a perfectly reasonable thing to ask for, and it silently loses the work
-  (recoverable from the reflog, but only if you know to look).
-
-  Same fix as the interactive shell case below: ask whether the **branch moved**,
-  not whether the index is dirty. Found by code reading, not reproduced — worth
-  a failing test first.
-
 - **`--keep-branch` / `--no-cleanup`.** The local branch is always deleted after
   the PR is opened; sometimes you want it for follow-up edits. Skips the
   `git branch -D` in `restoreRepo`.
@@ -110,17 +90,12 @@ Entries are unnumbered so nothing has to be renumbered as they come and go.
     is there now — including the case where the user reverted everything, which
     should then fall through to the usual "command made no changes" skip.
 
-  **Handle the hand-committed case by asking the branch, not the index.** If the
-  user runs `git commit` inside the shell, the staging step that follows finds
-  nothing to stage, skips the repo as "no changes", and `restoreRepo` then
-  deletes the branch that commit was on — silently destroying deliberate work.
-  This is the most damaging thing the feature can do, so **decided**: after the
-  shell, test whether the working branch has moved ahead of its base
-  (`git rev-list --count <base>..<branch>`, or `git diff --quiet <base>`), and if
-  it has, go straight to push and PR rather than through staging. A commit is a
-  commit no matter who made it; "did the tree change?" is the wrong question, and
-  "did the branch move?" is the right one. This also covers a command that
-  commits on its own — the same bug exists today, without `-i`.
+  **Hand-typed git is already handled.** A `git commit` inside the shell used to
+  be read as "no changes" and have its branch deleted; `processRepo` now decides
+  via `branchAhead` (`git rev-list --count <base>..<branch>`) instead of the
+  index, so a commit counts no matter who made it. A `git checkout -b` inside the
+  shell is followed rather than ignored, and the resulting branch is never
+  deleted. Nothing extra is needed for `s` beyond re-reading the diff.
 
   **This supersedes `--preview`**, which was going to run the command in a
   throwaway `git worktree`, print a diffstat and discard the result. That is
@@ -285,7 +260,21 @@ itself.
   paths in commands behave the way they would if you had cd'd in yourself.
 - **PRs always target the repo's own default branch.** No `--pr-base` override:
   the base and the branch's fork point have to agree for the PR's diff to be
-  exactly the commit the run made.
+  exactly the commit the run made. This holds even when the command supplies its
+  own head branch, below.
+- **A repo must start on its default branch, or it is skipped.** mkprs cuts its
+  branch from there and checks it back out during cleanup, so running from a
+  feature branch would silently move the user off their own branch. The skip
+  names both branches; a detached HEAD skips too.
+- **The command's branch wins, and is never deleted.** If the command leaves HEAD
+  somewhere else — `git checkout -b per-repo-name`, or a bare
+  `git checkout my-feature` over work done by hand earlier — mkprs commits,
+  pushes and opens the PR from *that* branch, and cleanup deletes only the branch
+  mkprs created itself. Deciding otherwise would mean committing to a branch
+  mkprs does not own and then destroying it.
+
+  Landing on the default branch is the one refusal: there would be nothing to
+  open a PR from, and staging would commit straight to `main`.
 - **No mutation testing.** Considered as a way to grade the suite, and rejected
   on the state of the tooling rather than the idea. It is a niche practice in Go
   — no large project runs it, and the most visible effort (mutation testing the
