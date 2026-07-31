@@ -32,13 +32,13 @@ func (o outcomeSuccess) note() string { return o.prURL }
 func (o outcomeSkipped) note() string { return o.reason }
 func (o outcomeFailed) note() string  { return o.reason }
 
-// openPR is the last step, and can end only two ways. base is always the repo's
-// own default branch; head is the branch the run actually ended on, which is
-// mkprs's own unless the command checked out one of its own.
-func (a *app) openPR(repoPath, base, head string, c *capture) outcome {
+// openPR is the last step, and can end only two ways. base is the repo's own
+// default branch, the same one the working branch was cut from, so the PR's
+// diff is exactly the commit this run just made.
+func (a *app) openPR(repoPath, base string, c *capture) outcome {
 	url, err := a.prs.open(repoPath, pullRequest{
 		Base:     base,
-		Head:     head,
+		Head:     a.cfg.branch,
 		Title:    a.cfg.title,
 		Body:     a.cfg.body,
 		Reviewer: a.cfg.reviewer,
@@ -116,19 +116,16 @@ func (a *app) processRepo(repoPath string, c *capture) outcome {
 		return fail(fmt.Sprintf("command exited %d", exitCode(err)))
 	}
 
-	// The command may have moved HEAD. `git checkout -b per-repo-name`, or even a
-	// bare `git checkout my-feature` over work done by hand earlier, can be the
-	// whole point of the run -- so follow it rather than staging blindly onto
-	// whatever happens to be checked out.
+	// mkprs cut this branch and everything below assumes it: staging and
+	// committing act on whatever is checked out, so a command that wandered off
+	// would commit to a branch mkprs does not own. A branch the command created
+	// survives -- cleanup only ever deletes mkprs's own.
 	work, ok := headBranch(repoPath)
 	if !ok {
 		return fail("command left the repo with a detached HEAD")
 	}
-	if work == defaultBranch {
-		return fail(fmt.Sprintf("command left the repo on '%s'; a PR needs a branch to open from", defaultBranch))
-	}
 	if work != cfg.branch {
-		fmt.Fprintf(c, "following branch '%s' left by the command\n", work)
+		return fail(fmt.Sprintf("command left the repo on '%s', not '%s'", work, cfg.branch))
 	}
 
 	if err := gitTo(repoPath, c, "add", "-A"); err != nil {
@@ -151,19 +148,19 @@ func (a *app) processRepo(repoPath string, c *capture) outcome {
 	// A command that commits and then reverts leaves the branch ahead with an
 	// empty diff, and will open an empty PR. That is visible and harmless; a
 	// silently deleted commit is neither.
-	ahead, ok := branchAhead(repoPath, base, work)
+	ahead, ok := branchAhead(repoPath, base, cfg.branch)
 	if !ok {
-		return fail(fmt.Sprintf("could not compare '%s' to %s", work, base))
+		return fail(fmt.Sprintf("could not compare '%s' to %s", cfg.branch, base))
 	}
 	if !ahead {
 		return skip("command made no changes")
 	}
 
-	if err := gitTo(repoPath, c, "push", "-u", "origin", work, "--quiet"); err != nil {
-		return fail(fmt.Sprintf("unable to push to origin/%s", work))
+	if err := gitTo(repoPath, c, "push", "-u", "origin", cfg.branch, "--quiet"); err != nil {
+		return fail(fmt.Sprintf("unable to push to origin/%s", cfg.branch))
 	}
 
-	return a.openPR(repoPath, defaultBranch, work, c)
+	return a.openPR(repoPath, defaultBranch, c)
 }
 
 // resolvePath mirrors realpath: absolute, with symlinks resolved. This matters

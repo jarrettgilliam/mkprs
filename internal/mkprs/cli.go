@@ -39,8 +39,10 @@ that is exactly {} becomes the repo's absolute path, also available as $REPO
 along with $REPO_NAME.
 
 Branches are cut from, and PRs opened against, each repo's own default branch. A
-repo is skipped when its working tree is dirty, the branch already exists, the
-command leaves no changes behind, or origin is not a GitHub remote.
+repo is skipped when it is not on that branch, its working tree is dirty, the
+branch already exists, the command leaves no changes behind, or origin is not a
+GitHub remote. The command must leave the repo on the branch mkprs created -- one
+that switches branches fails that repo, leaving its work in place.
 
 Examples:
   # Bump NuGet dependencies everywhere

@@ -142,9 +142,8 @@ func runHelper(args []string) int {
 		}
 		return 0
 
-	// gitcheckout <branch> [file content [leftover]] -- switches to branch,
-	// creating it if it does not exist, and optionally commits a file there
-	// and/or leaves one uncommitted behind.
+	// gitcheckout <branch> [file content] -- switches to branch, creating it if
+	// it does not exist, and optionally commits a file there.
 	case "gitcheckout":
 		checkout := []string{"checkout", "-q", rest[0]}
 		if !helperGitOK("rev-parse", "--verify", "--quiet", "refs/heads/"+rest[0]) {
@@ -166,10 +165,11 @@ func runHelper(args []string) int {
 				}
 			}
 		}
-		if len(rest) >= 4 {
-			return writeLines(rest[3], "left behind")
-		}
 		return 0
+
+	// gitdetach -- leaves HEAD off any branch.
+	case "gitdetach":
+		return helperGit("checkout", "-q", "--detach")
 
 	case "rm":
 		if err := os.Remove(rest[0]); err != nil {
@@ -439,15 +439,6 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-func readFile(t *testing.T, path string) string {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	return string(b)
-}
-
 // =============================================================================
 // Running mkprs in-process
 // =============================================================================
@@ -457,7 +448,6 @@ func readFile(t *testing.T, path string) string {
 type fakePR struct {
 	mu    sync.Mutex
 	calls []fakePRCall
-	url   string // when empty, a URL is derived from the repo name
 	err   error
 }
 
@@ -478,11 +468,7 @@ func (f *fakePR) open(repoPath string, pr pullRequest, log io.Writer) (string, e
 
 	// Like ghCLI, the URL is returned rather than written to log: it belongs on
 	// the result line, and echoing it here would print it twice.
-	url := f.url
-	if url == "" {
-		url = "https://github.com/fake/" + filepath.Base(repoPath) + "/pull/7"
-	}
-	return url, nil
+	return "https://github.com/fake/" + filepath.Base(repoPath) + "/pull/7", nil
 }
 
 func (f *fakePR) only(t *testing.T) fakePRCall {

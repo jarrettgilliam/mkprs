@@ -90,12 +90,18 @@ Entries are unnumbered so nothing has to be renumbered as they come and go.
     is there now — including the case where the user reverted everything, which
     should then fall through to the usual "command made no changes" skip.
 
-  **Hand-typed git is already handled.** A `git commit` inside the shell used to
-  be read as "no changes" and have its branch deleted; `processRepo` now decides
-  via `branchAhead` (`git rev-list --count <base>..<branch>`) instead of the
-  index, so a commit counts no matter who made it. A `git checkout -b` inside the
-  shell is followed rather than ignored, and the resulting branch is never
-  deleted. Nothing extra is needed for `s` beyond re-reading the diff.
+  **Hand-typed `git commit` is already handled.** It used to be read as "no
+  changes" and have its branch deleted; `processRepo` now decides via
+  `branchAhead` (`git rev-list --count <base>..<branch>`) instead of the index, so
+  a commit counts no matter who made it. Nothing extra is needed for `s` beyond
+  re-reading the diff.
+
+  **`git checkout` inside the shell fails the repo**, by the same rule that
+  applies to the command itself — and the shell is exactly where someone would
+  reach for it. The failure is safe (the branch and its commits survive), but the
+  message is written for a command, not for someone standing in a prompt. Worth
+  either a clearer message under `-i` or an explicit note at the prompt that the
+  branch must stay put.
 
   **This supersedes `--preview`**, which was going to run the command in a
   throwaway `git worktree`, print a diffstat and discard the result. That is
@@ -266,15 +272,25 @@ itself.
   branch from there and checks it back out during cleanup, so running from a
   feature branch would silently move the user off their own branch. The skip
   names both branches; a detached HEAD skips too.
-- **The command's branch wins, and is never deleted.** If the command leaves HEAD
-  somewhere else — `git checkout -b per-repo-name`, or a bare
-  `git checkout my-feature` over work done by hand earlier — mkprs commits,
-  pushes and opens the PR from *that* branch, and cleanup deletes only the branch
-  mkprs created itself. Deciding otherwise would mean committing to a branch
-  mkprs does not own and then destroying it.
+- **The command must leave the repo on the branch mkprs created.** Staging and
+  committing act on whatever HEAD points at, so a command that runs
+  `git checkout` would have its work committed to a branch mkprs does not own —
+  or, if it landed on the default branch, pushed straight to `main`. Any switch,
+  and a detached HEAD, fails that repo. Cleanup still deletes only mkprs's own
+  branch, so whatever the command created survives with its commits for the user
+  to pick up.
 
-  Landing on the default branch is the one refusal: there would be nothing to
-  open a PR from, and staging would commit straight to `main`.
+- **No "I did manual work, just open the PR" mode.** Considered — adopt the
+  branch the repo is already on, skip branch creation, allow no command, skip
+  cleanup — and dropped. `gh pr create` already infers base and head and fills
+  title and body from the commits, so a shell loop over `gh pr create --fill`
+  does the whole job. Inside mkprs it would cost a conditional `-b`, a new
+  per-repo source for the commit message and PR title (both currently derive from
+  the command text), and a second path through `processRepo` that every later
+  feature would have to reason about. An implicit trigger is also a trap: a batch
+  run would silently adopt a repo left on an old branch and open a PR mixing
+  unrelated work. Manual edits do not scale to forty repos, which is where mkprs
+  earns its keep, so the case is weakest exactly where the cost is highest.
 - **No mutation testing.** Considered as a way to grade the suite, and rejected
   on the state of the tooling rather than the idea. It is a niche practice in Go
   — no large project runs it, and the most visible effort (mutation testing the

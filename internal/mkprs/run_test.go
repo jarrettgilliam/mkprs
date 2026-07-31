@@ -339,122 +339,112 @@ func TestRunRequiresDefaultBranch(t *testing.T) {
 	})
 }
 
-// A command is free to move HEAD -- `git checkout -b per-repo-name`, or a bare
-// `git checkout my-feature` over work done by hand earlier. mkprs follows it,
-// opens the PR from it, and never deletes a branch it did not create itself.
-func TestRunFollowsTheCommandsBranch(t *testing.T) {
+// Everything after the command assumes mkprs's own branch is checked out:
+// staging and committing act on whatever HEAD points at. A command that switches
+// branches fails the repo rather than committing somewhere mkprs does not own.
+// Whatever it created is left in place for the user to find.
+func TestRunRefusesABranchSwitch(t *testing.T) {
 	t.Parallel()
 
-	t.Run("a branch the command creates and commits to", func(t *testing.T) {
-		t.Parallel()
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, f *fixture, repo string)
+		command func(t *testing.T) []string
+		want    string
+	}{
+		{
+			name:    "a branch the command creates and commits to",
+			command: func(t *testing.T) []string { return helperCmd(t, "gitcheckout", "other", "file.txt", "by the command") },
+			want:    "command left the repo on 'other', not 'b'",
+		},
+		{
+			name: "a pre-existing branch",
+			setup: func(t *testing.T, f *fixture, repo string) {
+				gitCmd(t, repo, "branch", "other")
+			},
+			command: func(t *testing.T) []string { return helperCmd(t, "gitcheckout", "other") },
+			want:    "command left the repo on 'other', not 'b'",
+		},
+		{
+			// Without this the run would commit straight to the default branch
+			// and push it, bypassing review entirely.
+			name:    "the default branch",
+			command: func(t *testing.T) []string { return helperCmd(t, "gitcheckout", "main", "file.txt", "sneaky") },
+			want:    "command left the repo on 'main', not 'b'",
+		},
+		{
+			name:    "a detached HEAD",
+			command: func(t *testing.T) []string { return helperCmd(t, "gitdetach") },
+			want:    "command left the repo with a detached HEAD",
+		},
+	}
 
-		f := newFixture(t)
-		repo := f.repo("x")
-		prs := &fakePR{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-		got := run(t, prs, []string{f.targets, "-b", "b"},
-			helperCmd(t, "gitcheckout", "other", "file.txt", "by the command")...)
+			f := newFixture(t)
+			repo := f.repo("x")
+			if tt.setup != nil {
+				tt.setup(t, f, repo)
+			}
+			mainBefore := f.remoteSubject("x", "main")
+			prs := &fakePR{}
 
-		if got.code != exitOK {
-			t.Errorf("exit code = %d, want %d\n%s", got.code, exitOK, got.all())
-		}
-		if !f.remoteHasBranch("x", "other") {
-			t.Fatalf("the command's branch was not pushed:\n%s", got.all())
-		}
-		call := prs.only(t)
-		if call.pr.Head != "other" {
-			t.Errorf("PR head = %q, want other", call.pr.Head)
-		}
-		if call.pr.Base != "main" {
-			t.Errorf("PR base = %q, want main", call.pr.Base)
-		}
-		// The command's branch is the user's; only mkprs's own is cleaned up.
-		if !localHasBranch(t, repo, "other") {
-			t.Error("the command's branch was deleted, it should survive")
-		}
-		if localHasBranch(t, repo, "b") {
-			t.Error("mkprs's own branch should have been deleted")
-		}
-		if got := currentBranch(t, repo); got != "main" {
-			t.Errorf("left on branch %q, want main", got)
-		}
-	})
+			got := run(t, prs, []string{f.targets, "-b", "b"}, tt.command(t)...)
 
-	t.Run("a branch the command creates and leaves dirty", func(t *testing.T) {
-		t.Parallel()
+			// One repo failing is not fatal to the run; the ❌ line carries it.
+			if got.code != exitOK {
+				t.Errorf("exit code = %d, want %d", got.code, exitOK)
+			}
+			if !strings.Contains(got.stdout, tt.want) {
+				t.Errorf("stdout = %q, want it to contain %q", got.stdout, tt.want)
+			}
+			if !strings.Contains(got.stdout, "Failed:    1") {
+				t.Errorf("summary did not count the failure:\n%s", got.stdout)
+			}
+			if len(prs.calls) != 0 {
+				t.Errorf("opened %d PRs, want none", len(prs.calls))
+			}
+			// Nothing reached origin: not the stray branch, not the default one.
+			if f.remoteHasBranch("x", "other") {
+				t.Error("the command's branch was pushed, it should not have been")
+			}
+			if got := f.remoteSubject("x", "main"); got != mainBefore {
+				t.Errorf("origin/main moved to %q, want it untouched at %q", got, mainBefore)
+			}
+			// mkprs cleans up only after itself.
+			if localHasBranch(t, repo, "b") {
+				t.Error("mkprs's own branch should have been deleted")
+			}
+			if got := currentBranch(t, repo); got != "main" {
+				t.Errorf("left on branch %q, want main", got)
+			}
+		})
+	}
+}
 
-		f := newFixture(t)
-		f.repo("x")
-		prs := &fakePR{}
+// A branch the command created is the user's, and survives the failure with its
+// commit intact -- cleanup only ever deletes the branch mkprs made.
+func TestRunLeavesTheCommandsBranchAlone(t *testing.T) {
+	t.Parallel()
 
-		run(t, prs, []string{f.targets, "-b", "b", "-m", "mkprs message"},
-			helperCmd(t, "gitcheckout", "other", "committed.txt", "by the command", "leftover.txt")...)
+	f := newFixture(t)
+	repo := f.repo("x")
+	prs := &fakePR{}
 
-		if got, want := f.remoteFile("x", "other", "leftover.txt"), "left behind"; got != want {
-			t.Errorf("leftover file = %q, want %q", got, want)
-		}
-		if got, want := f.remoteSubject("x", "other"), "mkprs message"; got != want {
-			t.Errorf("commit subject = %q, want %q", got, want)
-		}
-	})
+	run(t, prs, []string{f.targets, "-b", "b"},
+		helperCmd(t, "gitcheckout", "other", "file.txt", "by the command")...)
 
-	// The "manual work already done, now automate the PR" case: the command is
-	// nothing but a checkout, and the commits were made by hand earlier.
-	t.Run("a pre-existing branch already ahead of the default", func(t *testing.T) {
-		t.Parallel()
-
-		f := newFixture(t)
-		repo := f.repo("x")
-		gitCmd(t, repo, "checkout", "-q", "-b", "by-hand")
-		writeFile(t, filepath.Join(repo, "file.txt"), "done by hand\n")
-		gitCmd(t, repo, "commit", "-q", "-a", "-m", "hand-written work")
-		gitCmd(t, repo, "checkout", "-q", "main")
-		prs := &fakePR{}
-
-		got := run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "gitcheckout", "by-hand")...)
-
-		if got.code != exitOK {
-			t.Errorf("exit code = %d, want %d\n%s", got.code, exitOK, got.all())
-		}
-		call := prs.only(t)
-		if call.pr.Head != "by-hand" || call.pr.Base != "main" {
-			t.Errorf("PR = %+v, want head by-hand onto main", call.pr)
-		}
-		if got, want := f.remoteSubject("x", "by-hand"), "hand-written work"; got != want {
-			t.Errorf("pushed subject = %q, want %q", got, want)
-		}
-		if !localHasBranch(t, repo, "by-hand") {
-			t.Error("a branch mkprs did not create must never be deleted")
-		}
-	})
-
-	// Safety: without this guard the run would commit to the default branch and
-	// push it, bypassing review entirely.
-	t.Run("the default branch is refused", func(t *testing.T) {
-		t.Parallel()
-
-		f := newFixture(t)
-		f.repo("x")
-		before := f.remoteSubject("x", "main")
-		prs := &fakePR{}
-
-		got := run(t, prs, []string{f.targets, "-b", "b"},
-			helperCmd(t, "gitcheckout", "main", "file.txt", "sneaky")...)
-
-		// One repo failing is not fatal to the run; the ❌ line carries it.
-		if got.code != exitOK {
-			t.Errorf("exit code = %d, want %d", got.code, exitOK)
-		}
-		if want := "a PR needs a branch to open from"; !strings.Contains(got.stdout, want) {
-			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
-		}
-		if len(prs.calls) != 0 {
-			t.Errorf("opened %d PRs, want none", len(prs.calls))
-		}
-		if got := f.remoteSubject("x", "main"); got != before {
-			t.Errorf("origin/main moved to %q, want it untouched at %q", got, before)
-		}
-	})
+	if !localHasBranch(t, repo, "other") {
+		t.Fatal("the command's branch was deleted, it should survive")
+	}
+	if got, want := gitCmd(t, repo, "log", "-1", "--pretty=%s", "other"), "committed by the command"; got != want {
+		t.Errorf("'other' subject = %q, want %q", got, want)
+	}
+	if got, want := gitCmd(t, repo, "show", "other:file.txt"), "by the command"; got != want {
+		t.Errorf("'other' file = %q, want %q", got, want)
+	}
 }
 
 // Skips are normal outcomes, not errors: the run still exits 0.
