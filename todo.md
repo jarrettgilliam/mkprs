@@ -347,6 +347,44 @@ itself.
 
 ## Lower-priority polish
 
+- **There is no `README.md`.** The repo has `LICENSE`, `go.mod`, `main.go` and
+  this file — someone landing on it from GitHub gets no idea what mkprs is, and
+  `todo.md` is the closest thing to documentation, which reads as a backlog
+  rather than an introduction.
+
+  Worth covering, roughly in this order:
+
+  - **What it is, in two sentences**, with one example that shows the whole
+    shape. The `dotnet outdated -u` one from `usageTail` earns its place: run a
+    command across every repo under a directory, commit, open a PR each.
+  - **Install.** `go install github.com/jarrettgilliam/mkprs@latest`, plus the
+    `gh` prerequisite and `gh auth login` — today a user without the GitHub CLI
+    finds out by watching every repo fail. (The *Replace `gh`* section above
+    removes that requirement; until it lands the README has to state it.)
+  - **How it behaves per repo**: cut a branch from the default branch, run the
+    command, `git add -A`, commit, push, open the PR against the default branch,
+    then restore and delete the branch. The skip and failure conditions belong
+    here too — that is the part `--help` states tersely and a reader actually
+    needs prose for.
+  - **The `{}` / `$REPO` / `$REPO_NAME` contract** and the no-shell rule.
+
+  **Do not restate the flag table.** It lives in `usageHead` and pflag's
+  generated `FlagUsages`, and a copy in the README will drift the first time a
+  flag is added — every item under *Pull requests* above adds one. Link to
+  `mkprs --help` and keep the README to the parts that are stable.
+
+  Same risk applies to the examples, which is an argument for using few and
+  choosing ones tied to behaviour that will not change.
+
+  **Write this last.** Almost every open item above changes something the README
+  would have to state: the flags under *Pull requests* and *Scale & operability*
+  each add a line, *Start from any branch* rewrites the skip list, and *Replace
+  `gh`* removes the install prerequisite entirely. Documenting the tool before
+  those land means writing prose with a known expiry date. The cost of having no
+  README is borne by strangers arriving from GitHub, which is not yet the
+  audience; the cost of a stale one is borne by them too, and is worse, because
+  it is believed.
+
 - **Spell out names that outlive their line.** Single letters are fine for a
   local whose declaration is visible from its use. They are not fine for struct
   fields, package-level declarations, or parameters, where the reader meets the
