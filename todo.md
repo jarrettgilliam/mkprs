@@ -347,6 +347,40 @@ itself.
 
 ## Lower-priority polish
 
+- **Spell out names that outlive their line.** Single letters are fine for a
+  local whose declaration is visible from its use. They are not fine for struct
+  fields, package-level declarations, or parameters, where the reader meets the
+  name far from anything that explains it. A good name deletes the comment that
+  would have explained it.
+
+  Receivers stay short (`a`, `c`, `o`, `r`) — that is Go convention, not
+  laziness, and `func (c *capture)` reads fine because the type is right there.
+  `Write(p []byte)` keeps its parameter name to match `io.Writer`.
+
+  The actual offenders, all `internal/mkprs`:
+
+  | where | now | suggested |
+  |---|---|---|
+  | `outcome.go` field | `outcomeFailed.c` | `output` |
+  | `mkprs.go` field | `app.errw` | `errOut` |
+  | `git.go` params | `gitTo(…, w io.Writer)`, `fetchOrigin(…, w)`, `restoreRepo(…, w)` | `log` |
+  | `git.go` params | `resolveBase(repoPath, dflt)`, `restoreRepo(repoPath, dflt, …)` | `defaultBranch` |
+  | `run.go` params | `processRepo(…, c *capture)`, `openPR(…, c *capture)` | `output` |
+  | `cli.go` param | `printUsage(w io.Writer, fs *pflag.FlagSet)` | `out`, `flags` |
+
+  `outcomeFailed.c` is the one that proves the point: it carries a three-line
+  comment whose first job is saying what the field *is*. Named `output`, only the
+  non-obvious half needs to survive — that it is still being written to when the
+  outcome is built, because the deferred `restoreRepo` runs before the caller
+  reports.
+
+  `config`'s fields, the `usage*` constants and the `exit*` constants are already
+  fine; this is not a sweep of everything short.
+
+  Sequencing: `restoreRepo`'s `dflt` is also touched by *Start from any branch*
+  above, which renames it for a different reason (it stops being the default
+  branch at all). Do that one first and this row disappears.
+
 - **Trailing-flag robustness**: `mkprs tgt -b -- true` silently takes `--` as the
   branch name, then fails with "no command specified" because the terminator was
   consumed. pflag has no required-value guard for this; an explicit check that no
