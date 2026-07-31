@@ -19,10 +19,9 @@ const (
 	exitUsage = 1
 )
 
-// app is one run's wiring: what to do, where to write, how to open PRs.
-//
-// It exists so that nothing below Run reaches for os.Stdout, os.Stderr, or the
-// gh binary directly, which is what makes the package testable in-process.
+// app is one run's wiring: what to do, where to write, how to open PRs. It
+// exists so that nothing below Run reaches for os.Stdout, os.Stderr, or the gh
+// binary directly, which is what makes the package testable in-process.
 type app struct {
 	cfg  *config
 	out  io.Writer
@@ -99,9 +98,8 @@ func (a *app) run() int {
 			resultFail(a.out, width, name, o.reason, c)
 			failed++
 		default:
-			// Unreachable: attempt returns one of the three above. Report it
-			// rather than panic -- a programmer error should not take down a
-			// run that is 20 repos deep.
+			// Unreachable. Report it rather than panic -- a programmer error
+			// should not take down a run that is 20 repos deep.
 			resultFail(a.out, width, name, fmt.Sprintf("internal error: unhandled outcome %T", o), c)
 			failed++
 		}

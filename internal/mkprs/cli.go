@@ -34,53 +34,27 @@ Options:
 `
 
 const usageTail = `
-Short and long options accept either a space (-b my-branch) or equals (-b=my-branch) separator.
+The command runs from the repository root, executed directly rather than through
+a shell -- use ` + "`-- bash -c '...'`" + ` for globs, pipes or redirection. An argument
+that is exactly {} becomes the repo's absolute path, also available as $REPO
+along with $REPO_NAME.
 
-The command:
-  * runs with the current directory set to the repository root, so relative
-    paths work as they would if you had cd'd into the repo yourself
-  * is executed directly, not through a shell -- no globbing, pipes, or
-    redirection. Use ` + "`-- bash -c '...'`" + ` when you need those.
-  * has any argument that is exactly {} replaced with the repo's absolute path
-  * can read $REPO (absolute path) and $REPO_NAME (basename) from the environment
-
-A repo is skipped when its working tree is dirty, the branch already exists, the
-command leaves no changes behind, or its origin remote does not point at
-github.com.
-
-Each repo's branch is cut from, and its PR opened against, that repo's own
-default branch -- origin/HEAD, falling back to main and then master.
-
-Output is one line per repo: ✅ and the PR URL on success, ❌ and the reason on
-failure (followed by the tail of the command's output), ⏭️ when the repo was
-skipped. Command output is otherwise captured and discarded.
-
---log <dir> keeps that captured output instead. The directory holds one
-<repo>.log per repository -- the resolved command, its full output, the outcome
--- plus a summary.tsv of one tab-separated record each:
-
-  repo_path  status  branch  commit_sha  pr_url  notes
-
-Absent --log nothing is written to disk.
-
---verbose streams that output live instead of buffering it, each line prefixed
-with the repo it came from. It composes with --log: stream and write.
+Branches are cut from, and PRs opened against, each repo's own default branch. A
+repo is skipped when its working tree is dirty, the branch already exists, the
+command leaves no changes behind, or origin is not a GitHub remote.
 
 Examples:
   # Bump NuGet dependencies everywhere
-  ./mkprs ~/repos -b bump-deps -- dotnet outdated -u
+  mkprs ~/repos -b bump-deps -- dotnet outdated -u
 
   # Fix a typo, with an explicit commit message
-  ./mkprs ~/repos -b fix-typo -m "Fix typo in README" -- sed -i '' 's/teh/the/g' README.md
-
-  # Apply a patch file
-  ./mkprs ~/repos -b apply-x -- git apply /tmp/x.patch
+  mkprs ~/repos -b fix-typo -m "Fix typo in README" -- sed -i '' 's/teh/the/g' README.md
 
   # Anything needing a shell goes through bash -c
-  ./mkprs ~/repos -b lint -- bash -c 'npm ci && npm run lint:fix'
+  mkprs ~/repos -b lint -- bash -c 'npm ci && npm run lint:fix'
 
   # A tool that insists on an explicit path
-  ./mkprs ~/repos -b scan -- some-tool --root {}
+  mkprs ~/repos -b scan -- some-tool --root {}
 `
 
 func printUsage(w io.Writer, fs *pflag.FlagSet) {

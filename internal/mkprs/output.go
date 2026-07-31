@@ -14,9 +14,6 @@ const failTailLines = 20
 // capture collects everything a repo's command, git and gh emit. Output always
 // lands in buf; under --verbose it is also streamed live to out, line by line
 // and prefixed with the repo name.
-//
-// It replaces both the temp file and the subshell-escaping note file that the
-// shell version needed.
 type capture struct {
 	buf     bytes.Buffer
 	pending []byte
@@ -102,9 +99,6 @@ func resultOK(w io.Writer, width int, name, url string) {
 	fmt.Fprintf(w, "✅ %-*s PR created%s\n", width, name, suffix)
 }
 
-// Like resultSkip, this states a reason rather than falling back to a bare
-// "failed": every fail call site supplies one, and the capture tail below adds
-// whatever git or the command itself had to say.
 func resultFail(w io.Writer, width int, name, note string, c *capture) {
 	fmt.Fprintf(w, "❌ %-*s %s\n", width, name, note)
 	// Under --verbose the output has already streamed past; don't repeat it.
@@ -113,9 +107,6 @@ func resultFail(w io.Writer, width int, name, note string, c *capture) {
 	}
 }
 
-// Every skip states why: each r.skip call site supplies a reason, so there is
-// no fallback here. A blank note would be a bug in the caller, not something to
-// paper over with "unknown reason".
 func resultSkip(w io.Writer, width int, name, note string) {
 	fmt.Fprintf(w, "⏭️  %-*s skipped: %s\n", width, name, note)
 }

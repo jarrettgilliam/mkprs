@@ -10,13 +10,11 @@ import (
 )
 
 // outcome is the closed set of ways a repo can end up. A skip is a normal
-// result (dirty tree, nothing to do), not an error, which is why there are
-// three of these rather than an error and its absence.
+// result (dirty tree, nothing to do), not an error, hence three states rather
+// than an error and its absence.
 //
-// The unexported note method seals the interface: only the three types below
-// can implement it, and each constructor requires the data its variant carries,
-// so there is no way to build a skip without a reason. Outcomes are returned,
-// never assigned after the fact -- see attempt.
+// The unexported note method seals the interface, and each constructor requires
+// the data its variant carries, so a skip without a reason cannot be built.
 type outcome interface {
 	fmt.Stringer  // "success" | "skipped" | "failed" -- the summary.tsv contract
 	note() string // the PR URL on success, the reason otherwise
@@ -46,17 +44,15 @@ type repoResult struct {
 	resolvedCommand string
 }
 
-// processRepo takes one repo from discovery through to an open pull request.
 func (a *app) processRepo(repoPath string, c *capture) *repoResult {
 	r := &repoResult{path: repoPath}
 	r.outcome = a.attemptRunCommand(repoPath, r, c)
 	return r
 }
 
-// openPR is the last step, and can end only two ways.
-//
-// base is the repo's own default branch, the same one the working branch was
-// cut from -- so the PR's diff is exactly the commit this run just made.
+// openPR is the last step, and can end only two ways. base is the repo's own
+// default branch, the same one the working branch was cut from, so the PR's
+// diff is exactly the commit this run just made.
 func (a *app) openPR(repoPath, base string, r *repoResult, c *capture) outcome {
 	// Read the SHA while the branch still exists; cleanup deletes it after.
 	r.commitSHA = shortSHA(repoPath, a.cfg.branch)
@@ -74,13 +70,13 @@ func (a *app) openPR(repoPath, base string, r *repoResult, c *capture) outcome {
 	return success(url)
 }
 
-// attemptRunCommand runs one repo to a conclusion: the pre-flight filters, the user's
-// command, the commit and push, then the pull request.
+// attemptRunCommand runs one repo to a conclusion: the pre-flight filters, the
+// user's command, the commit and push, then the pull request.
 //
 // The signature is the guarantee. Every path has to return an outcome -- Go
 // will not compile a function that falls off the end -- so no repo can finish
-// unclassified. r is here only to collect the metadata the log wants
-// (resolvedCommand, commitSHA), which is legitimately empty on early exits.
+// unclassified. r only collects metadata for the log, which is legitimately
+// empty on early exits.
 func (a *app) attemptRunCommand(repoPath string, r *repoResult, c *capture) outcome {
 	cfg := a.cfg
 	repoName := filepath.Base(repoPath)
@@ -109,7 +105,6 @@ func (a *app) attemptRunCommand(repoPath string, r *repoResult, c *capture) outc
 	base := resolveBase(repoPath, defaultBranch)
 	abs := resolvePath(repoPath)
 
-	// Substitute {} with the repo path, leaving every other argument untouched.
 	expanded := make([]string, 0, len(cfg.command))
 	for _, arg := range cfg.command {
 		if arg == "{}" {

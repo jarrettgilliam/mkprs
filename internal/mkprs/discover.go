@@ -8,19 +8,14 @@ import (
 	"path/filepath"
 )
 
-// discoverRepos appends every repository found under targetDir to repos.
-//
-// This reproduces `find <dir> -type d -name .git -prune -print0` exactly:
+// discoverRepos appends every repository found under targetDir to repos, in
+// lexical order.
 //
 //   - Only .git *directories* count. A submodule's .git is a file holding a
-//     "gitdir:" pointer, so submodules are not repositories for our purposes --
-//     dropping the IsDir check would silently start walking into them.
+//     "gitdir:" pointer, so dropping the IsDir check would start walking into
+//     submodules.
 //   - Pruning stops descent into .git itself, not into the rest of the tree, so
-//     a repository nested inside another repository is still discovered. Both
-//     the parent and the child are returned.
-//
-// Unlike find, WalkDir yields entries in lexical order, so the result is
-// deterministic.
+//     a repo nested inside another repo is discovered too, and both are returned.
 func discoverRepos(targetDir string, repos []string, warn io.Writer) []string {
 	info, err := os.Stat(targetDir)
 	if err != nil || !info.IsDir() {

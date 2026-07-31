@@ -31,8 +31,7 @@ func newLogger(dir string, warn io.Writer) (*logger, error) {
 		return nil, fmt.Errorf("could not create log directory: %s", dir)
 	}
 	if _, err := summary.WriteString(tsvHeader); err != nil {
-		// The file is open but this logger will never exist, so nothing else
-		// can close it.
+		// No logger will exist, so nothing else can close this.
 		_ = summary.Close()
 		return nil, fmt.Errorf("could not create log directory: %s", dir)
 	}
@@ -71,8 +70,7 @@ func (l *logger) record(cfg *config, r *repoResult, c *capture) {
 	}
 
 	// A repoResult built anywhere but processRepo can carry no outcome at all.
-	// Record that as a failure rather than panicking, matching how the switch
-	// in run handles it: an unrecorded result must never read as success.
+	// An unrecorded result must never read as success.
 	status, note := "failed", ""
 	if r.outcome != nil {
 		status, note = r.outcome.String(), r.outcome.note()
