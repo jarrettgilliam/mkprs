@@ -114,7 +114,7 @@ func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
 
 	switch {
 	case len(cfg.targetDirs) < 1:
-		return nil, fs, errors.New("Must specify at least one target dir")
+		return nil, fs, errors.New("must specify at least one target dir")
 	case cfg.branch == "":
 		return nil, fs, errors.New("-b/--branch is required")
 	case len(cfg.command) == 0:
