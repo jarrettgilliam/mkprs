@@ -109,7 +109,8 @@ func runHelper(args []string) int {
 			return 1
 		}
 
-		defer f.Close()
+		defer func() { _ = f.Close() }()
+
 		fmt.Fprintln(f, strings.Join(rest[1:], " "))
 		return 0
 
