@@ -11,15 +11,6 @@ mocked and, later, swapped for direct API calls.
 Completed items are deleted rather than marked done — `git log` is the record.
 Entries are unnumbered so nothing has to be renumbered as they come and go.
 
-## Pull requests
-
-- **`-r` accepts only one reviewer.** `gh` itself takes comma-separated
-  reviewers and supports `--label`, `--assignee`, `--milestone`.
-  Allow `-r alice,bob` (verify it already passes through, then document it) and
-  add the rest as passthrough flags. Each becomes a field on `pullRequest` plus a
-  line in `ghArgs` (`internal/mkprs/pr.go`), so a REST implementation of
-  `prOpener` gets them without its own flag plumbing.
-
 ## Scale & operability
 
 - **`--keep-branch` / `--no-cleanup`.** The local branch is always deleted after
@@ -309,6 +300,13 @@ itself.
   and a detached HEAD, fails that repo. Cleanup still deletes only mkprs's own
   branch, so whatever the command created survives with its commits for the user
   to pick up.
+
+- **No `--label`, `--assignee` or `--milestone` passthrough.** `gh pr create`
+  supports all three and each is a one-line addition to `ghArgs`, but they are
+  not used here — so they would be flags, config fields, `pullRequest` fields and
+  test rows carried indefinitely for nobody, and a REST `prOpener` would owe each
+  of them a second or third API call (see *API notes*). `-r` stays because review
+  requests are the one piece of PR metadata a batch run actually sets.
 
 - **No "I did manual work, just open the PR" mode.** Considered — adopt the
   branch the repo is already on, skip branch creation, allow no command, skip

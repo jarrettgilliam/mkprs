@@ -15,7 +15,7 @@ type config struct {
 	message    string
 	title      string
 	body       string
-	reviewer   string
+	reviewers  string
 	draft      bool
 	verbose    bool
 	command    []string
@@ -87,7 +87,7 @@ func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
 	fs.StringVarP(&cfg.message, "message", "m", "", "Commit `msg` (default: the command text)")
 	fs.StringVarP(&cfg.title, "title", "t", "", "PR `title` (default: first line of commit message)")
 	fs.StringVarP(&cfg.body, "body", "B", "", "PR `body` description (default: empty)")
-	fs.StringVarP(&cfg.reviewer, "reviewer", "r", "", "GitHub `user` to request review from (optional)")
+	fs.StringVarP(&cfg.reviewers, "reviewer", "r", "", "Comma-separated `users` or org/team handles to request review from")
 	fs.BoolVarP(&cfg.draft, "draft", "d", false, "Open the pull requests as drafts")
 	fs.BoolVarP(&cfg.verbose, "verbose", "v", false, "Stream command output live, prefixed by repo name")
 	// pflag handles an undeclared --help itself, but only a declared one shows

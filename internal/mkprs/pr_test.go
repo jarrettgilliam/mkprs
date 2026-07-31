@@ -28,7 +28,7 @@ func TestGhArgs(t *testing.T) {
 		},
 		{
 			name: "with a reviewer",
-			pr:   pullRequest{Base: "main", Head: "fix", Title: "Fix it", Body: "why", Reviewer: "alice"},
+			pr:   pullRequest{Base: "main", Head: "fix", Title: "Fix it", Body: "why", Reviewers: "alice"},
 			want: []string{
 				"pr", "create",
 				"--base", "main",
@@ -36,6 +36,20 @@ func TestGhArgs(t *testing.T) {
 				"--title", "Fix it",
 				"--body", "why",
 				"--reviewer", "alice",
+			},
+		},
+		{
+			// gh takes the list itself, so mkprs hands the string over whole
+			// rather than splitting and repeating the flag.
+			name: "several reviewers pass through as one value",
+			pr:   pullRequest{Base: "main", Head: "fix", Title: "Fix it", Reviewers: "alice,bob,myorg/team"},
+			want: []string{
+				"pr", "create",
+				"--base", "main",
+				"--head", "fix",
+				"--title", "Fix it",
+				"--body", "",
+				"--reviewer", "alice,bob,myorg/team",
 			},
 		},
 		{

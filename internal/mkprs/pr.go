@@ -8,14 +8,15 @@ import (
 	"strings"
 )
 
-// pullRequest is what to open, independent of how it gets opened.
+// pullRequest is what to open, independent of how it gets opened. Reviewers
+// holds a comma-separated list, which is the form gh takes.
 type pullRequest struct {
-	Base     string
-	Head     string
-	Title    string
-	Body     string
-	Reviewer string
-	Draft    bool
+	Base      string
+	Head      string
+	Title     string
+	Body      string
+	Reviewers string
+	Draft     bool
 }
 
 // prOpener opens a pull request and returns its URL. Everything the attempt
@@ -38,8 +39,8 @@ func ghArgs(pr pullRequest) []string {
 		"--title", pr.Title,
 		"--body", pr.Body,
 	}
-	if pr.Reviewer != "" {
-		args = append(args, "--reviewer", pr.Reviewer)
+	if pr.Reviewers != "" {
+		args = append(args, "--reviewer", pr.Reviewers)
 	}
 	if pr.Draft {
 		args = append(args, "--draft")

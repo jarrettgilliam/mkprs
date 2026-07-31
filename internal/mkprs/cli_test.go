@@ -82,7 +82,12 @@ func TestParseArgsFlagForms(t *testing.T) {
 		{
 			name: "flags after the target dir",
 			args: []string{"/tmp", "-b", "x", "-m", "msg", "-t", "title", "-B", "body", "-r", "alice", "--", "true"},
-			want: config{branch: "x", message: "msg", title: "title", body: "body", reviewer: "alice"},
+			want: config{branch: "x", message: "msg", title: "title", body: "body", reviewers: "alice"},
+		},
+		{
+			name: "several reviewers",
+			args: []string{"/tmp", "-b", "x", "-r", "alice,bob", "--", "true"},
+			want: config{branch: "x", reviewers: "alice,bob"},
 		},
 		{
 			name: "draft short form",
@@ -122,8 +127,8 @@ func TestParseArgsFlagForms(t *testing.T) {
 			if cfg.body != tt.want.body {
 				t.Errorf("body = %q, want %q", cfg.body, tt.want.body)
 			}
-			if cfg.reviewer != tt.want.reviewer {
-				t.Errorf("reviewer = %q, want %q", cfg.reviewer, tt.want.reviewer)
+			if cfg.reviewers != tt.want.reviewers {
+				t.Errorf("reviewers = %q, want %q", cfg.reviewers, tt.want.reviewers)
 			}
 			if cfg.draft != tt.want.draft {
 				t.Errorf("draft = %v, want %v", cfg.draft, tt.want.draft)

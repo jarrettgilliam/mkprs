@@ -13,12 +13,12 @@ import (
 // diff is exactly the commit this run just made.
 func (a *app) openPR(repoPath, base string, c *capture) outcome {
 	url, err := a.prs.open(repoPath, pullRequest{
-		Base:     base,
-		Head:     a.cfg.branch,
-		Title:    a.cfg.title,
-		Body:     a.cfg.body,
-		Reviewer: a.cfg.reviewer,
-		Draft:    a.cfg.draft,
+		Base:      base,
+		Head:      a.cfg.branch,
+		Title:     a.cfg.title,
+		Body:      a.cfg.body,
+		Reviewers: a.cfg.reviewers,
+		Draft:     a.cfg.draft,
 	}, c)
 	if err != nil {
 		return fail(err.Error(), c)

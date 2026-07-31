@@ -87,16 +87,16 @@ func TestRunPullRequestFields(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit title, body and reviewer are passed through", func(t *testing.T) {
+	t.Run("explicit title, body and reviewers are passed through", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
 		f.repo("x")
 		prs := &fakePR{}
 
-		run(t, prs, []string{f.targets, "-b", "b", "-m", "msg", "-t", "Title", "-B", "Body", "-r", "alice"}, helperCmd(t, "write", "file.txt", "x")...)
+		run(t, prs, []string{f.targets, "-b", "b", "-m", "msg", "-t", "Title", "-B", "Body", "-r", "alice,bob"}, helperCmd(t, "write", "file.txt", "x")...)
 
-		want := pullRequest{Base: "main", Head: "b", Title: "Title", Body: "Body", Reviewer: "alice"}
+		want := pullRequest{Base: "main", Head: "b", Title: "Title", Body: "Body", Reviewers: "alice,bob"}
 		if got := prs.only(t).pr; got != want {
 			t.Errorf("pullRequest = %+v, want %+v", got, want)
 		}
