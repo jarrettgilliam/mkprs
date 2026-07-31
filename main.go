@@ -9,5 +9,5 @@ import (
 )
 
 func main() {
-	mkprs.Run(os.Args[1:])
+	os.Exit(mkprs.Run(os.Args[1:], os.Stdout, os.Stderr))
 }

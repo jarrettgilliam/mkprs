@@ -2,6 +2,7 @@ package mkprs
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -20,10 +21,10 @@ import (
 //
 // Unlike find, WalkDir yields entries in lexical order, so the result is
 // deterministic.
-func discoverRepos(targetDir string, repos []string) []string {
+func discoverRepos(targetDir string, repos []string, warn io.Writer) []string {
 	info, err := os.Stat(targetDir)
 	if err != nil || !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "Warning: Target directory does not exist: %s\n", targetDir)
+		fmt.Fprintf(warn, "Warning: Target directory does not exist: %s\n", targetDir)
 		return repos
 	}
 
@@ -42,7 +43,7 @@ func discoverRepos(targetDir string, repos []string) []string {
 		return fs.SkipDir
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: error while searching %s: %v\n", targetDir, err)
+		fmt.Fprintf(warn, "Warning: error while searching %s: %v\n", targetDir, err)
 	}
 
 	return repos

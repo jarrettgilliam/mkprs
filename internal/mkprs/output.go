@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -26,8 +25,8 @@ type capture struct {
 	out     io.Writer
 }
 
-func newCapture(name string, verbose bool) *capture {
-	return &capture{name: name, verbose: verbose, out: os.Stdout}
+func newCapture(name string, verbose bool, out io.Writer) *capture {
+	return &capture{name: name, verbose: verbose, out: out}
 }
 
 func (c *capture) Write(p []byte) (int, error) {
@@ -103,10 +102,10 @@ func resultOK(w io.Writer, width int, name, url string) {
 	fmt.Fprintf(w, "✅ %-*s PR created%s\n", width, name, suffix)
 }
 
+// Like resultSkip, this states a reason rather than falling back to a bare
+// "failed": every fail call site supplies one, and the capture tail below adds
+// whatever git or the command itself had to say.
 func resultFail(w io.Writer, width int, name, note string, c *capture) {
-	if note == "" {
-		note = "failed"
-	}
 	fmt.Fprintf(w, "❌ %-*s %s\n", width, name, note)
 	// Under --verbose the output has already streamed past; don't repeat it.
 	if !c.verbose && !c.empty() {
@@ -114,10 +113,10 @@ func resultFail(w io.Writer, width int, name, note string, c *capture) {
 	}
 }
 
+// Every skip states why: each r.skip call site supplies a reason, so there is
+// no fallback here. A blank note would be a bug in the caller, not something to
+// paper over with "unknown reason".
 func resultSkip(w io.Writer, width int, name, note string) {
-	if note == "" {
-		note = "unknown reason"
-	}
 	fmt.Fprintf(w, "⏭️  %-*s skipped: %s\n", width, name, note)
 }
 

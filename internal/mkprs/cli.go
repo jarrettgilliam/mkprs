@@ -1,9 +1,9 @@
 package mkprs
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/spf13/pflag"
 )
@@ -86,14 +86,20 @@ func printUsage(w io.Writer, fs *pflag.FlagSet) {
 	fmt.Fprint(w, usageTail)
 }
 
-// parseArgs builds the config from argv. It exits the process on any usage
-// error rather than returning one.
-func parseArgs(args []string) *config {
+// parseArgs builds the config from argv, returning the flag set alongside it so
+// the caller can render usage. Problems come back as errors -- deciding which
+// stream to print on, and whether to exit, is the command's job.
+//
+// -h/--help comes back as pflag.ErrHelp. It is not a failure: the caller prints
+// usage to stdout and exits 0. Every other error is a bad invocation.
+func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
 	cfg := &config{}
 
 	fs := pflag.NewFlagSet("mkprs", pflag.ContinueOnError)
 	fs.SortFlags = false
-	fs.Usage = func() { printUsage(os.Stderr, fs) }
+	// ContinueOnError still prints the error and usage on its own way out.
+	// Discarding that leaves parseArgs a pure function of its arguments.
+	fs.SetOutput(io.Discard)
 
 	fs.StringVarP(&cfg.branch, "branch", "b", "", "Branch `name` to create in each repo (required)")
 	fs.StringVarP(&cfg.message, "message", "m", "", "Commit `msg` (default: the command text)")
@@ -102,19 +108,18 @@ func parseArgs(args []string) *config {
 	fs.StringVarP(&cfg.reviewer, "reviewer", "r", "", "GitHub `user` to request review from (optional)")
 	fs.StringVar(&cfg.logDir, "log", "", "Write per-repo logs and summary.tsv to `dir`")
 	fs.BoolVarP(&cfg.verbose, "verbose", "v", false, "Stream command output live, prefixed by repo name")
+	// pflag handles an undeclared --help itself, but only a declared one shows
+	// up in the Options block. Declaring it and raising pflag's own sentinel
+	// keeps both the listing and the standard signal.
 	help := fs.BoolP("help", "h", false, "Show this help message")
 
-	// ContinueOnError returns the error rather than printing it, so report it
-	// here. pflag's own wording ("unknown flag: --bogus") is kept as-is.
+	// pflag's own wording ("unknown flag: --bogus") is kept as-is.
 	if err := fs.Parse(args); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		printUsage(os.Stderr, fs)
-		os.Exit(1)
+		return nil, fs, err
 	}
 
 	if *help {
-		printUsage(os.Stdout, fs)
-		os.Exit(0)
+		return nil, fs, pflag.ErrHelp
 	}
 
 	// Everything before `--` is a target dir; everything after is the command.
@@ -127,21 +132,14 @@ func parseArgs(args []string) *config {
 		cfg.targetDirs = rest
 	}
 
-	if len(cfg.targetDirs) < 1 {
-		usageError(fs, "Must specify at least one target dir")
-	}
-	if cfg.branch == "" {
-		usageError(fs, "-b/--branch is required")
-	}
-	if len(cfg.command) == 0 {
-		usageError(fs, "no command specified (everything after -- is the command to run)")
+	switch {
+	case len(cfg.targetDirs) < 1:
+		return nil, fs, errors.New("Must specify at least one target dir")
+	case cfg.branch == "":
+		return nil, fs, errors.New("-b/--branch is required")
+	case len(cfg.command) == 0:
+		return nil, fs, errors.New("no command specified (everything after -- is the command to run)")
 	}
 
-	return cfg
-}
-
-func usageError(fs *pflag.FlagSet, msg string) {
-	fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
-	printUsage(os.Stderr, fs)
-	os.Exit(1)
+	return cfg, fs, nil
 }

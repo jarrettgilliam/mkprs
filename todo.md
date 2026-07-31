@@ -285,6 +285,36 @@ create files), but a command that drops build artifacts in a repo with a thin
 
 - Add `--tracked-only` to stage with `git add -u` instead.
 
+### 15. Typed skip reasons ✅ PARTIALLY DONE
+
+**Done:** `outcome` is no longer an int enum on a mutable field. It is a sealed
+sum type (`internal/mkprs/run.go`) — three structs behind an interface with an
+unexported `note()` method, each built by a constructor that requires its data:
+`success(prURL)`, `skip(reason)`, `fail(reason)`. Outcomes are *returned* by
+`attempt`, never assigned after the fact, which is what makes the guarantee a
+compiler one: deleting the final `return` gives `missing return`, and calling
+`skip()` bare gives `not enough arguments in call to skip`. The `pending` state
+that briefly existed to catch this at runtime is gone, as are `resultSkip` and
+`resultFail`'s empty-note fallbacks — every call site now states a reason,
+including the three git failures that used to print a bare "failed"
+(`could not create branch` / `could not stage changes` / `could not commit`).
+
+**Left:** the reason itself is still a free-form string.
+
+- Replace `skip(reason string)` with a closed set, so the six skip sites name a
+  constant rather than writing prose that could drift.
+- Two reasons carry runtime detail — `branchLocation`'s "locally"/"on origin"
+  and the offending remote URL — so a detail field has to survive alongside the
+  constant. That is the wrinkle that makes this more than a mechanical swap.
+- **Keep `String()` collapsing every skip to `"skipped"`.** It feeds the
+  `status` column of `summary.tsv` and the `status:` line of each `<repo>.log`;
+  widening those values would break the `awk -F'\t' '$2=="failed"'` contract
+  promised in #5.
+- Would not close the residual gaps, which are inherent to Go: in-package code
+  can still write `outcomeSkipped{}` with an empty reason, or leave the
+  interface nil. The `default:` arm of the type switch in `mkprs.go` reports
+  those loudly rather than silently.
+
 ## Design notes (decided, not TODO)
 
 - **No `-c "shell string"` mode.** The command is argv after `--`, executed

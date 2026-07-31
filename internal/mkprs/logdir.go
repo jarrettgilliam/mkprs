@@ -2,6 +2,7 @@ package mkprs
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +15,10 @@ const tsvHeader = "repo_path\tstatus\tbranch\tcommit_sha\tpr_url\tnotes\n"
 type logger struct {
 	dir     string
 	summary *os.File
+	warn    io.Writer
 }
 
-func newLogger(dir string) (*logger, error) {
+func newLogger(dir string, warn io.Writer) (*logger, error) {
 	if dir == "" {
 		return nil, nil
 	}
@@ -29,10 +31,13 @@ func newLogger(dir string) (*logger, error) {
 		return nil, fmt.Errorf("could not create log directory: %s", dir)
 	}
 	if _, err := summary.WriteString(tsvHeader); err != nil {
+		// The file is open but this logger will never exist, so nothing else
+		// can close it.
+		_ = summary.Close()
 		return nil, fmt.Errorf("could not create log directory: %s", dir)
 	}
 
-	return &logger{dir: dir, summary: summary}, nil
+	return &logger{dir: dir, summary: summary, warn: warn}, nil
 }
 
 func (l *logger) close() {
@@ -65,10 +70,18 @@ func (l *logger) record(cfg *config, r *repoResult, c *capture) {
 		return
 	}
 
+	// A repoResult built anywhere but processRepo can carry no outcome at all.
+	// Record that as a failure rather than panicking, matching how the switch
+	// in run handles it: an unrecorded result must never read as success.
+	status, note := "failed", ""
+	if r.outcome != nil {
+		status, note = r.outcome.String(), r.outcome.note()
+	}
+
 	// On success the note is the PR URL; it belongs in pr_url, not in notes too.
-	prURL, tsvNote := "", r.note
-	if r.outcome == outcomeSuccess {
-		prURL, tsvNote = r.note, ""
+	prURL, tsvNote := "", note
+	if s, ok := r.outcome.(outcomeSuccess); ok {
+		prURL, tsvNote = s.prURL, ""
 	}
 
 	command := r.resolvedCommand
@@ -80,20 +93,20 @@ func (l *logger) record(cfg *config, r *repoResult, c *capture) {
 	fmt.Fprintf(&b, "repo:     %s\n", r.path)
 	fmt.Fprintf(&b, "branch:   %s\n", cfg.branch)
 	fmt.Fprintf(&b, "command:  %s\n", command)
-	fmt.Fprintf(&b, "status:   %s\n", r.outcome)
+	fmt.Fprintf(&b, "status:   %s\n", status)
 	fmt.Fprintf(&b, "commit:   %s\n", dashIfEmpty(r.commitSHA))
-	fmt.Fprintf(&b, "note:     %s\n", dashIfEmpty(r.note))
+	fmt.Fprintf(&b, "note:     %s\n", dashIfEmpty(note))
 	b.WriteString("----------------------------------------\n")
 	b.WriteString(c.String())
 
 	dest := l.logFileFor(filepath.Base(r.path))
 	if err := os.WriteFile(dest, []byte(b.String()), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", dest, err)
+		fmt.Fprintf(l.warn, "Warning: could not write %s: %v\n", dest, err)
 	}
 
 	fmt.Fprintf(l.summary, "%s\t%s\t%s\t%s\t%s\t%s\n",
 		tsvField(r.path),
-		r.outcome,
+		status,
 		tsvField(cfg.branch),
 		r.commitSHA,
 		tsvField(prURL),

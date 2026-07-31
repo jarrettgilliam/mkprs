@@ -55,9 +55,9 @@ func isCleanTree(repoPath string) bool {
 	return err == nil && out == ""
 }
 
-// defaultBranch resolves the repo's default branch, preferring origin/HEAD and
+// getDefaultBranch resolves the repo's default branch, preferring origin/HEAD and
 // falling back to the conventional names.
-func defaultBranch(repoPath string) (string, bool) {
+func getDefaultBranch(repoPath string) (string, bool) {
 	if name, err := git(repoPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil && name != "" {
 		return strings.TrimPrefix(name, "origin/"), true
 	}

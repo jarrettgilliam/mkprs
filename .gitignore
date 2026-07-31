@@ -1,3 +1,5 @@
-# Build output. test.sh compiles this on every run.
+# Build output from `go build -o mkprs .`.
 /mkprs
+
+# JetBrains stuff
 /.idea/
