@@ -500,7 +500,8 @@ func TestRunOutputVerbosity(t *testing.T) {
 		}
 	})
 
-	// gh's own output is recorded in the log but never echoed live.
+	// The URL belongs on the result line; the PR opener never writes it into
+	// the capture, so there is nothing to stream.
 	t.Run("verbose does not stream the PR url", func(t *testing.T) {
 		t.Parallel()
 
@@ -529,6 +530,80 @@ func TestRunOutputVerbosity(t *testing.T) {
 
 		if n := strings.Count(got.stdout, "boom"); n != 1 {
 			t.Errorf("output mentions boom %d times, want 1:\n%s", n, got.stdout)
+		}
+	})
+}
+
+// A failure is the one place the whole capture is replayed, since there is no
+// --log to read it from. Nothing is truncated and nothing is held back -- not
+// even the PR opener's output, which used to be visible only in the log file.
+func TestRunFailuresExplainThemselves(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the command's full output is printed", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("x")
+
+		got := run(t, &fakePR{}, []string{f.targets, "-b", "b"}, helperCmd(t, "fail", "3", "it went wrong")...)
+
+		if !strings.Contains(got.stdout, "❌ x command exited 3") {
+			t.Errorf("stdout missing the reason:\n%s", got.stdout)
+		}
+		if !strings.Contains(got.stdout, "    it went wrong") {
+			t.Errorf("stdout missing the indented output:\n%s", got.stdout)
+		}
+	})
+
+	// A long failure is replayed in full: truncating it would put the useful
+	// part out of reach now that there is nowhere else to look.
+	t.Run("long output is not truncated", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("x")
+
+		got := run(t, &fakePR{}, []string{f.targets, "-b", "b"}, helperCmd(t, "spew", "100", "3")...)
+
+		for _, want := range []string{"    line-1\n", "    line-100\n"} {
+			if !strings.Contains(got.stdout, want) {
+				t.Errorf("stdout missing %q:\n%s", want, got.stdout)
+			}
+		}
+	})
+
+	// The gap this change closed: a PR failure used to say only "failed to
+	// create PR", with the opener's explanation reachable only via --log.
+	t.Run("the PR opener's output is shown", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("x")
+		prs := &fakePR{err: errors.New("failed to create PR")}
+
+		got := run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if !strings.Contains(got.stdout, "❌ x failed to create PR") {
+			t.Errorf("stdout missing the reason:\n%s", got.stdout)
+		}
+		if !strings.Contains(got.stdout, "    pull request failed") {
+			t.Errorf("stdout missing the opener's output:\n%s", got.stdout)
+		}
+	})
+
+	// ...and under --verbose it streams live instead, rather than vanishing.
+	t.Run("the PR opener's output streams under verbose", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("x")
+		prs := &fakePR{err: errors.New("failed to create PR")}
+
+		got := run(t, prs, []string{f.targets, "-b", "b", "-v"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if !strings.Contains(got.stdout, "[x] pull request failed") {
+			t.Errorf("stdout missing the streamed opener output:\n%s", got.stdout)
 		}
 	})
 }

@@ -91,12 +91,12 @@ func TestNameWidthMinimum(t *testing.T) {
 	}
 }
 
-// A failed repo replays the tail of its output, indented -- but not under
-// --verbose, where it has already streamed past.
+// A failed repo replays all of its output, indented -- but not under --verbose,
+// where it has already streamed past.
 func TestResultFailReplaysOutput(t *testing.T) {
 	t.Parallel()
 
-	t.Run("quiet replays the tail", func(t *testing.T) {
+	t.Run("quiet replays everything", func(t *testing.T) {
 		t.Parallel()
 
 		var out bytes.Buffer
@@ -128,18 +128,21 @@ func TestResultFailReplaysOutput(t *testing.T) {
 	})
 }
 
-func TestCaptureTail(t *testing.T) {
+func TestCaptureIndented(t *testing.T) {
 	t.Parallel()
 
-	t.Run("truncates to the last n lines", func(t *testing.T) {
+	// Nothing is truncated: with --log gone this replay is the only place a
+	// failure's output can be read.
+	t.Run("keeps every line", func(t *testing.T) {
 		t.Parallel()
 
+		const lines = 500
 		c := newCapture("web", false, &bytes.Buffer{})
-		for i := 0; i < failTailLines+5; i++ {
+		for i := 0; i < lines; i++ {
 			c.Write([]byte("line\n"))
 		}
-		if got := strings.Count(c.tail(failTailLines), "\n"); got != failTailLines {
-			t.Errorf("tail has %d lines, want %d", got, failTailLines)
+		if got := strings.Count(c.indented(), "\n"); got != lines {
+			t.Errorf("indented has %d lines, want %d", got, lines)
 		}
 	})
 
@@ -150,8 +153,8 @@ func TestCaptureTail(t *testing.T) {
 		if !c.empty() {
 			t.Error("empty() = false on a fresh capture")
 		}
-		if got := c.tail(20); got != "" {
-			t.Errorf("tail = %q, want empty", got)
+		if got := c.indented(); got != "" {
+			t.Errorf("indented = %q, want empty", got)
 		}
 	})
 }
@@ -218,23 +221,6 @@ func TestCaptureStreaming(t *testing.T) {
 		}
 	})
 
-	// gh's output belongs in the log but is never echoed live, even under
-	// --verbose. raw() is what keeps that true.
-	t.Run("raw records without streaming", func(t *testing.T) {
-		t.Parallel()
-
-		var out bytes.Buffer
-		c := newCapture("web", true, &out)
-		c.raw().Write([]byte("https://example/1\n"))
-		c.flush()
-
-		if out.Len() != 0 {
-			t.Errorf("raw output streamed: %q", out.String())
-		}
-		if got, want := c.String(), "https://example/1\n"; got != want {
-			t.Errorf("capture = %q, want %q", got, want)
-		}
-	})
 }
 
 func TestPrintSummary(t *testing.T) {

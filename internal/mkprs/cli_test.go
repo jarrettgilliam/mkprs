@@ -71,8 +71,8 @@ func TestParseArgsFlagForms(t *testing.T) {
 		},
 		{
 			name: "long equals form",
-			args: []string{"/tmp", "--branch=my-branch", "--log=/logs", "--", "true"},
-			want: config{branch: "my-branch", logDir: "/logs"},
+			args: []string{"/tmp", "--branch=my-branch", "--", "true"},
+			want: config{branch: "my-branch"},
 		},
 		{
 			name: "verbose short form",
@@ -114,9 +114,6 @@ func TestParseArgsFlagForms(t *testing.T) {
 			}
 			if cfg.reviewer != tt.want.reviewer {
 				t.Errorf("reviewer = %q, want %q", cfg.reviewer, tt.want.reviewer)
-			}
-			if cfg.logDir != tt.want.logDir {
-				t.Errorf("logDir = %q, want %q", cfg.logDir, tt.want.logDir)
 			}
 			if cfg.verbose != tt.want.verbose {
 				t.Errorf("verbose = %v, want %v", cfg.verbose, tt.want.verbose)
@@ -191,7 +188,7 @@ func TestParseArgsHelp(t *testing.T) {
 				"Usage: mkprs",
 				"Everything after -- is the command",
 				"-b, --branch",
-				"--log dir",
+				"-v, --verbose",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("usage missing %q\n%s", want, out)

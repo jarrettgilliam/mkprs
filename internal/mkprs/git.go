@@ -102,15 +102,6 @@ func resolveBase(repoPath, dflt string) string {
 	return dflt
 }
 
-// shortSHA is the abbreviated commit hash at rev, or "" if it cannot be read.
-func shortSHA(repoPath, rev string) string {
-	sha, err := git(repoPath, "rev-parse", "--short", rev)
-	if err != nil {
-		return ""
-	}
-	return sha
-}
-
 // restoreRepo abandons the working branch and returns the repo to dflt.
 func restoreRepo(repoPath, dflt, branch string, w io.Writer) {
 	_ = gitTo(repoPath, w, "checkout", dflt, "--quiet")

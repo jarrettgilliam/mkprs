@@ -8,9 +8,6 @@ import (
 	"strings"
 )
 
-// failTailLines is how much of a failed repo's output is replayed inline.
-const failTailLines = 20
-
 // capture collects everything a repo's command, git and gh emit. Output always
 // lands in buf; under --verbose it is also streamed live to out, line by line
 // and prefixed with the repo name.
@@ -53,26 +50,18 @@ func (c *capture) flush() {
 	}
 }
 
-// raw appends to the capture without streaming it. gh's output is recorded in
-// the log but never echoed live, even under --verbose.
-func (c *capture) raw() io.Writer { return &c.buf }
-
 func (c *capture) String() string { return c.buf.String() }
 func (c *capture) empty() bool    { return c.buf.Len() == 0 }
 
-// tail returns the last n lines, each indented by four spaces.
-func (c *capture) tail(n int) string {
+// indented returns the whole capture, each line indented by four spaces.
+func (c *capture) indented() string {
 	text := strings.TrimSuffix(c.buf.String(), "\n")
 	if text == "" {
 		return ""
 	}
-	lines := strings.Split(text, "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
 
 	var b strings.Builder
-	for _, line := range lines {
+	for _, line := range strings.Split(text, "\n") {
 		b.WriteString("    ")
 		b.WriteString(line)
 		b.WriteString("\n")
@@ -103,7 +92,7 @@ func resultFail(w io.Writer, width int, name, note string, c *capture) {
 	fmt.Fprintf(w, "❌ %-*s %s\n", width, name, note)
 	// Under --verbose the output has already streamed past; don't repeat it.
 	if !c.verbose && !c.empty() {
-		fmt.Fprint(w, c.tail(failTailLines))
+		fmt.Fprint(w, c.indented())
 	}
 }
 

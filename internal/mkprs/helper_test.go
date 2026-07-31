@@ -167,6 +167,22 @@ func runHelper(args []string) int {
 		fmt.Fprintln(os.Stderr, strings.Join(rest[1:], " "))
 		return code
 
+	// spew <lines> <exit-code> prints numbered lines before failing, so a test
+	// can check that a long failure is replayed in full rather than truncated.
+	case "spew":
+		lines, err := strconv.Atoi(rest[0])
+		if err != nil {
+			return 2
+		}
+		code, err := strconv.Atoi(rest[1])
+		if err != nil {
+			return 2
+		}
+		for i := 1; i <= lines; i++ {
+			fmt.Printf("line-%d\n", i)
+		}
+		return code
+
 	default:
 		fmt.Fprintf(os.Stderr, "helper: unknown mode %q\n", mode)
 		return 2
@@ -385,11 +401,12 @@ func (f *fakePR) open(repoPath string, pr pullRequest, log io.Writer) (string, e
 		return "", f.err
 	}
 
+	// Like ghCLI, the URL is returned rather than written to log: it belongs on
+	// the result line, and echoing it here would print it twice.
 	url := f.url
 	if url == "" {
 		url = "https://github.com/fake/" + filepath.Base(repoPath) + "/pull/7"
 	}
-	fmt.Fprintln(log, url)
 	return url, nil
 }
 

@@ -48,16 +48,20 @@ func (ghCLI) open(repoPath string, pr pullRequest, log io.Writer) (string, error
 		return "", fmt.Errorf("'gh' (GitHub CLI) is not installed")
 	}
 
-	// gh prints the PR URL on stdout; that URL is the success line.
+	// gh prints the PR URL on stdout; that URL is the success line, so it is
+	// deliberately not echoed into log -- doing so would print it twice.
 	var stdout bytes.Buffer
 	cmd := exec.Command("gh", ghArgs(pr)...)
 	cmd.Dir = repoPath
 	cmd.Stdout = &stdout
 	cmd.Stderr = log
-	err := cmd.Run()
 
-	fmt.Fprintf(log, "%s\n", strings.TrimSuffix(stdout.String(), "\n"))
-	if err != nil {
+	if err := cmd.Run(); err != nil {
+		// gh explains itself on stderr, which already reached log; add stdout
+		// too in case it put something there.
+		if out := strings.TrimSpace(stdout.String()); out != "" {
+			fmt.Fprintln(log, out)
+		}
 		return "", fmt.Errorf("failed to create PR")
 	}
 

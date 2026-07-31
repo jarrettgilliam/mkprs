@@ -228,20 +228,6 @@ func TestFetchOriginToleratesFailure(t *testing.T) {
 	}
 }
 
-func TestShortSHA(t *testing.T) {
-	t.Parallel()
-
-	f := newFixture(t)
-	repo := f.repo("x")
-
-	if got := shortSHA(repo, "HEAD"); len(got) < 7 {
-		t.Errorf("shortSHA = %q, want an abbreviated hash", got)
-	}
-	if got := shortSHA(repo, "no-such-rev"); got != "" {
-		t.Errorf("shortSHA = %q for a bad rev, want empty", got)
-	}
-}
-
 func TestRestoreRepo(t *testing.T) {
 	t.Parallel()
 

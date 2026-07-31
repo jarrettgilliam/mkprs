@@ -53,13 +53,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 func (a *app) run() int {
-	lg, err := newLogger(a.cfg.logDir, a.errw)
-	if err != nil {
-		fmt.Fprintf(a.errw, "Error: %v\n", err)
-		return exitUsage
-	}
-	defer lg.close()
-
 	if a.cfg.message == "" {
 		a.cfg.message = strings.Join(a.cfg.command, " ")
 	}
@@ -84,10 +77,10 @@ func (a *app) run() int {
 		name := filepath.Base(repoPath)
 		c := newCapture(name, a.cfg.verbose, a.out)
 
-		r := a.processRepo(repoPath, c)
+		res := a.attemptRunCommand(repoPath, c)
 		c.flush()
 
-		switch o := r.outcome.(type) {
+		switch o := res.(type) {
 		case outcomeSuccess:
 			resultOK(a.out, width, name, o.prURL)
 			processed++
@@ -103,8 +96,6 @@ func (a *app) run() int {
 			resultFail(a.out, width, name, fmt.Sprintf("internal error: unhandled outcome %T", o), c)
 			failed++
 		}
-
-		lg.record(a.cfg, r, c)
 	}
 
 	printSummary(a.out, processed, failed, skipped)

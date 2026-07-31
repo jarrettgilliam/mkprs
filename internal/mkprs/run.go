@@ -6,17 +6,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 // outcome is the closed set of ways a repo can end up. A skip is a normal
 // result (dirty tree, nothing to do), not an error, hence three states rather
 // than an error and its absence.
 //
-// The unexported note method seals the interface, and each constructor requires
+// Callers read the concrete variants through a type switch, so note has no
+// callers of its own: it is here to seal the interface, since an unexported
+// method cannot be implemented outside this package. Each constructor requires
 // the data its variant carries, so a skip without a reason cannot be built.
 type outcome interface {
-	fmt.Stringer  // "success" | "skipped" | "failed" -- the summary.tsv contract
 	note() string // the PR URL on success, the reason otherwise
 }
 
@@ -28,42 +28,21 @@ func success(prURL string) outcome { return outcomeSuccess{prURL: prURL} }
 func skip(reason string) outcome   { return outcomeSkipped{reason: reason} }
 func fail(reason string) outcome   { return outcomeFailed{reason: reason} }
 
-func (outcomeSuccess) String() string { return "success" }
-func (outcomeSkipped) String() string { return "skipped" }
-func (outcomeFailed) String() string  { return "failed" }
-
 func (o outcomeSuccess) note() string { return o.prURL }
 func (o outcomeSkipped) note() string { return o.reason }
 func (o outcomeFailed) note() string  { return o.reason }
 
-// repoResult is everything worth recording about one repository.
-type repoResult struct {
-	path            string
-	outcome         outcome
-	commitSHA       string
-	resolvedCommand string
-}
-
-func (a *app) processRepo(repoPath string, c *capture) *repoResult {
-	r := &repoResult{path: repoPath}
-	r.outcome = a.attemptRunCommand(repoPath, r, c)
-	return r
-}
-
 // openPR is the last step, and can end only two ways. base is the repo's own
 // default branch, the same one the working branch was cut from, so the PR's
 // diff is exactly the commit this run just made.
-func (a *app) openPR(repoPath, base string, r *repoResult, c *capture) outcome {
-	// Read the SHA while the branch still exists; cleanup deletes it after.
-	r.commitSHA = shortSHA(repoPath, a.cfg.branch)
-
+func (a *app) openPR(repoPath, base string, c *capture) outcome {
 	url, err := a.prs.open(repoPath, pullRequest{
 		Base:     base,
 		Head:     a.cfg.branch,
 		Title:    a.cfg.title,
 		Body:     a.cfg.body,
 		Reviewer: a.cfg.reviewer,
-	}, c.raw())
+	}, c)
 	if err != nil {
 		return fail(err.Error())
 	}
@@ -75,9 +54,8 @@ func (a *app) openPR(repoPath, base string, r *repoResult, c *capture) outcome {
 //
 // The signature is the guarantee. Every path has to return an outcome -- Go
 // will not compile a function that falls off the end -- so no repo can finish
-// unclassified. r only collects metadata for the log, which is legitimately
-// empty on early exits.
-func (a *app) attemptRunCommand(repoPath string, r *repoResult, c *capture) outcome {
+// unclassified.
+func (a *app) attemptRunCommand(repoPath string, c *capture) outcome {
 	cfg := a.cfg
 	repoName := filepath.Base(repoPath)
 
@@ -105,6 +83,7 @@ func (a *app) attemptRunCommand(repoPath string, r *repoResult, c *capture) outc
 	base := resolveBase(repoPath, defaultBranch)
 	abs := resolvePath(repoPath)
 
+	// Substitute {} with the repo path, leaving every other argument untouched.
 	expanded := make([]string, 0, len(cfg.command))
 	for _, arg := range cfg.command {
 		if arg == "{}" {
@@ -113,7 +92,6 @@ func (a *app) attemptRunCommand(repoPath string, r *repoResult, c *capture) outc
 			expanded = append(expanded, arg)
 		}
 	}
-	r.resolvedCommand = strings.Join(expanded, " ")
 
 	if err := gitTo(repoPath, c, "checkout", "-b", cfg.branch, base, "--quiet"); err != nil {
 		return fail("could not create branch")
@@ -148,7 +126,7 @@ func (a *app) attemptRunCommand(repoPath string, r *repoResult, c *capture) outc
 		return fail(fmt.Sprintf("unable to push to origin/%s", cfg.branch))
 	}
 
-	return a.openPR(repoPath, defaultBranch, r, c)
+	return a.openPR(repoPath, defaultBranch, c)
 }
 
 // resolvePath mirrors realpath: absolute, with symlinks resolved. This matters

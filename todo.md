@@ -24,10 +24,17 @@ Entries are unnumbered so nothing has to be renumbered as they come and go.
 
 - **Serial execution.** Across N repos with network round-trips this is
   painfully slow. `golang.org/x/sync/errgroup` with `SetLimit(N)` over
-  `processRepo`, exposed as `-j/--jobs <N>` — the item that motivated leaving
-  bash. `capture` already buffers per repo so results stay coherent; only
-  `--verbose` interleaves. Result lines must be emitted from a single goroutine
-  to stay one per line.
+  `attemptRunCommand`, exposed as `-j/--jobs <N>` — the item that motivated
+  leaving bash. `capture` already buffers per repo so results stay coherent;
+  only `--verbose` interleaves. Result lines must be emitted from a single
+  goroutine to stay one per line.
+
+  Decide how failure output is batched before building this. A failure now
+  replays its whole capture inline, which is coherent because runs are serial;
+  with N in flight, two repos failing at once would interleave their replays.
+  The `--log` directory that used to give each repo its own file is gone, so
+  the fix has to live in the output path — most likely a mutex around
+  "result line plus replay" so each failure stays one contiguous block.
 
 - **`--keep-branch` / `--no-cleanup`.** The local branch is always deleted after
   the PR is opened; sometimes you want it for follow-up edits. Skips the
@@ -53,6 +60,12 @@ Entries are unnumbered so nothing has to be renumbered as they come and go.
   first repo fails because the command itself is wrong, you want to stop and fix
   it rather than watch 29 more failures scroll by. `--fail-fast`.
 
+  This also repairs `--verbose`, which is currently worse than the default for
+  diagnosing a failure: quiet prints the failing repo's output as one contiguous
+  block under its `❌`, while verbose streams those bytes live mixed with every
+  other repo's and skips the replay. Stopping at the first failure makes that
+  moot — one repo's worth of output, and it is the last thing on screen.
+
 - **`--tracked-only` staging.** `git add -A` stages everything the command left
   behind, including new files. That is the right default (tools like
   `dotnet outdated -u` and scaffolders create files), but a command that drops
@@ -70,9 +83,9 @@ string.
 - Two reasons carry runtime detail — `branchLocation`'s "locally"/"on origin"
   and the offending remote URL — so a detail field has to survive alongside the
   constant. That is the wrinkle that makes this more than a mechanical swap.
-- **Keep `String()` collapsing every skip to `"skipped"`.** It feeds the
-  `status` column of `summary.tsv` and the `status:` line of each `<repo>.log`;
-  widening those values would break the `awk -F'\t' '$2=="failed"'` contract.
+- Nothing renders a status word any more — `outcome.String()` went with `--log`,
+  and `mkprs.go`'s type switch reads the concrete variants — so a closed set is
+  now purely about keeping the reasons themselves from drifting.
 - Would not close the residual gaps, which are inherent to Go: in-package code
   can still write `outcomeSkipped{}` with an empty reason, or leave the interface
   nil. The `default:` arm of the type switch in `mkprs.go` reports those loudly.
@@ -86,7 +99,7 @@ GitHub CLI gets `'gh' (GitHub CLI) is not installed` and no PRs.
 Opening a pull request is one `POST`, so this costs a `net/http` call and an auth
 story — no new dependencies. **The seam already exists.** `ghCLI` implements
 `prOpener` (`internal/mkprs/pr.go`); a `restAPI` implementing the same interface
-drops in without touching `processRepo`. `TestGhArgs` covers the translation for
+drops in without touching `openPR`. `TestGhArgs` covers the translation for
 the CLI path and end-to-end tests inject `fakePR`, so neither needs rewriting.
 
 ### Authentication
@@ -121,9 +134,10 @@ discovering it after N commits have been pushed.
 fine-grained PAT needs *Pull requests: write* plus *Contents: read*.
 
 **Never let the token reach disk or `ps`.** Pass it as an `Authorization` header
-built at call time — not on a command line, and not into the `capture` that
-`--log` writes out. A redaction test is worth having, since the log deliberately
-records everything else.
+built at call time — not on a command line, and not into the `capture`. That
+last one is sharper than it looks: a failed repo now replays its entire capture
+to stdout, so anything the API layer writes there is printed verbatim. A
+redaction test is worth having.
 
 **Enterprise**: derive the host from `remote.origin.url` rather than hardcoding
 `api.github.com`; GHES lives at `https://<host>/api/v3/`. `originURL` already
