@@ -123,7 +123,7 @@ func runHelper(args []string) int {
 		return 0
 
 	// gitcommit <file> <content> [leftover] -- a command that commits its own
-	// work, optionally leaving an uncommitted file behind afterwards. Its cwd is
+	// work, optionally leaving an uncommitted file behind afterward. Its cwd is
 	// already the repo, and it inherits the pinned GIT_* identity.
 	case "gitcommit":
 		if code := writeLines(rest[0], rest[1]); code != 0 {

@@ -703,7 +703,7 @@ func TestRunWarnsAboutMissingTargetDir(t *testing.T) {
 	}
 }
 
-// By default a repo's own output is captured, not printed. --verbose streams it
+// By default, a repo's own output is captured, not printed. --verbose streams it
 // live, prefixed with the repo it came from.
 func TestRunOutputVerbosity(t *testing.T) {
 	t.Parallel()
