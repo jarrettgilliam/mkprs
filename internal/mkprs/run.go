@@ -8,30 +8,6 @@ import (
 	"path/filepath"
 )
 
-// outcome is the closed set of ways a repo can end up. A skip is a normal
-// result (dirty tree, nothing to do), not an error, hence three states rather
-// than an error and its absence.
-//
-// Callers read the concrete variants through a type switch, so note has no
-// callers of its own: it is here to seal the interface, since an unexported
-// method cannot be implemented outside this package. Each constructor requires
-// the data its variant carries, so a skip without a reason cannot be built.
-type outcome interface {
-	note() string // the PR URL on success, the reason otherwise
-}
-
-type outcomeSuccess struct{ prURL string }
-type outcomeSkipped struct{ reason string }
-type outcomeFailed struct{ reason string }
-
-func success(prURL string) outcome { return outcomeSuccess{prURL: prURL} }
-func skip(reason string) outcome   { return outcomeSkipped{reason: reason} }
-func fail(reason string) outcome   { return outcomeFailed{reason: reason} }
-
-func (o outcomeSuccess) note() string { return o.prURL }
-func (o outcomeSkipped) note() string { return o.reason }
-func (o outcomeFailed) note() string  { return o.reason }
-
 // openPR is the last step, and can end only two ways. base is the repo's own
 // default branch, the same one the working branch was cut from, so the PR's
 // diff is exactly the commit this run just made.
@@ -44,7 +20,7 @@ func (a *app) openPR(repoPath, base string, c *capture) outcome {
 		Reviewer: a.cfg.reviewer,
 	}, c)
 	if err != nil {
-		return fail(err.Error())
+		return fail(err.Error(), c)
 	}
 	return success(url)
 }
@@ -101,7 +77,7 @@ func (a *app) processRepo(repoPath string, c *capture) outcome {
 	}
 
 	if err := gitTo(repoPath, c, "checkout", "-b", cfg.branch, base, "--quiet"); err != nil {
-		return fail("could not create branch")
+		return fail("could not create branch", c)
 	}
 	// The branch exists from here on, so restore the repo however we leave --
 	// including the success path, where this runs after the PR is opened.
@@ -113,7 +89,7 @@ func (a *app) processRepo(repoPath string, c *capture) outcome {
 	cmd.Stdout = c
 	cmd.Stderr = c
 	if err := cmd.Run(); err != nil {
-		return fail(fmt.Sprintf("command exited %d", exitCode(err)))
+		return fail(fmt.Sprintf("command exited %d", exitCode(err)), c)
 	}
 
 	// mkprs cut this branch and everything below assumes it: staging and
@@ -122,21 +98,21 @@ func (a *app) processRepo(repoPath string, c *capture) outcome {
 	// survives -- cleanup only ever deletes mkprs's own.
 	work, ok := headBranch(repoPath)
 	if !ok {
-		return fail("command left the repo with a detached HEAD")
+		return fail("command left the repo with a detached HEAD", c)
 	}
 	if work != cfg.branch {
-		return fail(fmt.Sprintf("command left the repo on '%s', not '%s'", work, cfg.branch))
+		return fail(fmt.Sprintf("command left the repo on '%s', not '%s'", work, cfg.branch), c)
 	}
 
 	if err := gitTo(repoPath, c, "add", "-A"); err != nil {
-		return fail("could not stage changes")
+		return fail("could not stage changes", c)
 	}
 
 	// --quiet exits 0 when there is nothing staged. Nothing staged is not the
 	// same as nothing done: the command may have committed its own work.
 	if !gitOK(repoPath, "diff", "--cached", "--quiet") {
 		if err := gitTo(repoPath, c, "commit", "-q", "-m", cfg.message); err != nil {
-			return fail("could not commit")
+			return fail("could not commit", c)
 		}
 	}
 
@@ -150,14 +126,14 @@ func (a *app) processRepo(repoPath string, c *capture) outcome {
 	// silently deleted commit is neither.
 	ahead, ok := branchAhead(repoPath, base, cfg.branch)
 	if !ok {
-		return fail(fmt.Sprintf("could not compare '%s' to %s", cfg.branch, base))
+		return fail(fmt.Sprintf("could not compare '%s' to %s", cfg.branch, base), c)
 	}
 	if !ahead {
 		return skip("command made no changes")
 	}
 
 	if err := gitTo(repoPath, c, "push", "-u", "origin", cfg.branch, "--quiet"); err != nil {
-		return fail(fmt.Sprintf("unable to push to origin/%s", cfg.branch))
+		return fail(fmt.Sprintf("unable to push to origin/%s", cfg.branch), c)
 	}
 
 	return a.openPR(repoPath, defaultBranch, c)

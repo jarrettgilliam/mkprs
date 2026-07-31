@@ -70,8 +70,7 @@ func (a *app) run() int {
 		return exitOK
 	}
 
-	width := nameWidth(repos)
-	var processed, failed, skipped int
+	rep := newReporter(a.out, repos)
 
 	for _, repoPath := range repos {
 		name := filepath.Base(repoPath)
@@ -80,25 +79,18 @@ func (a *app) run() int {
 		res := a.processRepo(repoPath, c)
 		c.flush()
 
-		switch o := res.(type) {
-		case outcomeSuccess:
-			resultOK(a.out, width, name, o.prURL)
-			processed++
-		case outcomeSkipped:
-			resultSkip(a.out, width, name, o.reason)
-			skipped++
-		case outcomeFailed:
-			resultFail(a.out, width, name, o.reason, c)
-			failed++
-		default:
-			// Unreachable. Report it rather than panic -- a programmer error
-			// should not take down a run that is 20 repos deep.
-			resultFail(a.out, width, name, fmt.Sprintf("internal error: unhandled outcome %T", o), c)
-			failed++
+		// Unreachable: every path through processRepo ends in a constructor.
+		// But `return nil` would compile, and calling a method on a nil
+		// interface panics -- a programmer error should not take down a run
+		// that is 20 repos deep. Substituting a failure rather than skipping
+		// keeps the repo in the output and the summary adding up.
+		if res == nil {
+			res = fail("internal error: processRepo returned no outcome", c)
 		}
+		res.report(rep, name)
 	}
 
-	printSummary(a.out, processed, failed, skipped)
+	rep.summary()
 	return exitOK
 }
 

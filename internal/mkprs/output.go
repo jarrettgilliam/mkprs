@@ -80,30 +80,23 @@ func nameWidth(repos []string) int {
 	return width
 }
 
-func resultOK(w io.Writer, width int, name, url string) {
-	suffix := ""
-	if url != "" {
-		suffix = "  " + url
-	}
-	fmt.Fprintf(w, "✅ %-*s PR created%s\n", width, name, suffix)
+// reporter renders one result line per repo and keeps the running tally.
+// Outcomes report themselves through it, so nothing here knows which kind it is
+// holding.
+type reporter struct {
+	out                        io.Writer
+	width                      int
+	succeeded, failed, skipped int
 }
 
-func resultFail(w io.Writer, width int, name, note string, c *capture) {
-	fmt.Fprintf(w, "❌ %-*s %s\n", width, name, note)
-	// Under --verbose the output has already streamed past; don't repeat it.
-	if !c.verbose && !c.empty() {
-		fmt.Fprint(w, c.indented())
-	}
+func newReporter(out io.Writer, repos []string) *reporter {
+	return &reporter{out: out, width: nameWidth(repos)}
 }
 
-func resultSkip(w io.Writer, width int, name, note string) {
-	fmt.Fprintf(w, "⏭️  %-*s skipped: %s\n", width, name, note)
-}
-
-func printSummary(w io.Writer, processed, failed, skipped int) {
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "=== Summary ===")
-	fmt.Fprintf(w, "Succeeded: %d\n", processed)
-	fmt.Fprintf(w, "Failed:    %d\n", failed)
-	fmt.Fprintf(w, "Skipped:   %d\n", skipped)
+func (r *reporter) summary() {
+	fmt.Fprintln(r.out, "")
+	fmt.Fprintln(r.out, "=== Summary ===")
+	fmt.Fprintf(r.out, "Succeeded: %d\n", r.succeeded)
+	fmt.Fprintf(r.out, "Failed:    %d\n", r.failed)
+	fmt.Fprintf(r.out, "Skipped:   %d\n", r.skipped)
 }

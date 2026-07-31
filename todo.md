@@ -174,11 +174,18 @@ string.
   and the offending remote URL — so a detail field has to survive alongside the
   constant. That is the wrinkle that makes this more than a mechanical swap.
 - Nothing renders a status word any more — `outcome.String()` went with `--log`,
-  and `mkprs.go`'s type switch reads the concrete variants — so a closed set is
-  now purely about keeping the reasons themselves from drifting.
-- Would not close the residual gaps, which are inherent to Go: in-package code
-  can still write `outcomeSkipped{}` with an empty reason, or leave the interface
-  nil. The `default:` arm of the type switch in `mkprs.go` reports those loudly.
+  and each variant now renders itself through `report` — so a closed set is now
+  purely about keeping the reasons themselves from drifting.
+- Would not close the one residual gap, which is inherent to Go: in-package code
+  can still write `outcomeSkipped{}` with an empty reason. Dispatch closed the
+  gap that mattered — an unhandled variant is now a compile error, where the old
+  `default:` arm caught it at runtime.
+- The only way left to hand `run()` a broken outcome is an explicit `return nil`
+  from `processRepo`, which compiles because `nil` is a valid value of any
+  interface type. `run()` substitutes a failure for it, so that mistake prints an
+  internal error rather than panicking mid-run. Value receivers rule out the
+  subtler version of this — a non-nil interface holding a nil pointer, where
+  `res != nil` is true but the call still dereferences nil.
 
 ## Replace `gh` with direct GitHub API calls
 
