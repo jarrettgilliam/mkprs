@@ -79,7 +79,7 @@ func TestFailureReplaysOutput(t *testing.T) {
 
 		var out bytes.Buffer
 		c := newCapture("web", false, &out)
-		c.Write([]byte("line one\nline two\n"))
+		_, _ = c.Write([]byte("line one\nline two\n"))
 
 		var buf bytes.Buffer
 		fail("boom", c).report(&reporter{out: &buf, width: 3}, "web")
@@ -95,7 +95,7 @@ func TestFailureReplaysOutput(t *testing.T) {
 
 		var out bytes.Buffer
 		c := newCapture("web", true, &out)
-		c.Write([]byte("line one\n"))
+		_, _ = c.Write([]byte("line one\n"))
 
 		var buf bytes.Buffer
 		fail("boom", c).report(&reporter{out: &buf, width: 3}, "web")

@@ -23,8 +23,12 @@ func newCapture(name string, verbose bool, out io.Writer) *capture {
 	return &capture{name: name, verbose: verbose, out: out}
 }
 
+// Write makes capture an io.Writer, which is what lets it be handed straight to
+// exec.Cmd.Stdout. The error is always nil, and callers may ignore it: the
+// buffer cannot fail, and a broken stdout is not a reason to abandon a repo's
+// command mid-run.
 func (c *capture) Write(p []byte) (int, error) {
-	c.buf.Write(p)
+	c.buf.Write(p) // documented never to fail
 	if !c.verbose {
 		return len(p), nil
 	}

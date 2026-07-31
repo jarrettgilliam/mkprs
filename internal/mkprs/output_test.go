@@ -24,7 +24,7 @@ func TestCaptureIndented(t *testing.T) {
 		const lines = 500
 		c := newCapture("web", false, &bytes.Buffer{})
 		for i := 0; i < lines; i++ {
-			c.Write([]byte("line\n"))
+			_, _ = c.Write([]byte("line\n"))
 		}
 		if got := strings.Count(c.indented(), "\n"); got != lines {
 			t.Errorf("indented has %d lines, want %d", got, lines)
@@ -53,7 +53,7 @@ func TestCaptureStreaming(t *testing.T) {
 
 		var out bytes.Buffer
 		c := newCapture("web", true, &out)
-		c.Write([]byte("one\ntwo\n"))
+		_, _ = c.Write([]byte("one\ntwo\n"))
 
 		if got, want := out.String(), "[web] one\n[web] two\n"; got != want {
 			t.Errorf("got %q, want %q", got, want)
@@ -65,11 +65,11 @@ func TestCaptureStreaming(t *testing.T) {
 
 		var out bytes.Buffer
 		c := newCapture("web", true, &out)
-		c.Write([]byte("par"))
+		_, _ = c.Write([]byte("par"))
 		if out.Len() != 0 {
 			t.Errorf("streamed %q before the newline", out.String())
 		}
-		c.Write([]byte("tial\n"))
+		_, _ = c.Write([]byte("tial\n"))
 		if got, want := out.String(), "[web] partial\n"; got != want {
 			t.Errorf("got %q, want %q", got, want)
 		}
@@ -82,7 +82,7 @@ func TestCaptureStreaming(t *testing.T) {
 
 		var out bytes.Buffer
 		c := newCapture("web", true, &out)
-		c.Write([]byte("no newline"))
+		_, _ = c.Write([]byte("no newline"))
 		c.flush()
 
 		if got, want := out.String(), "[web] no newline\n"; got != want {
@@ -95,7 +95,7 @@ func TestCaptureStreaming(t *testing.T) {
 
 		var out bytes.Buffer
 		c := newCapture("web", false, &out)
-		c.Write([]byte("one\n"))
+		_, _ = c.Write([]byte("one\n"))
 		c.flush()
 
 		if out.Len() != 0 {
