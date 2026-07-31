@@ -18,6 +18,7 @@ func (a *app) openPR(repoPath, base string, c *capture) outcome {
 		Title:    a.cfg.title,
 		Body:     a.cfg.body,
 		Reviewer: a.cfg.reviewer,
+		Draft:    a.cfg.draft,
 	}, c)
 	if err != nil {
 		return fail(err.Error(), c)

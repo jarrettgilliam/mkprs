@@ -17,7 +17,7 @@ func TestParseArgsUsageErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"no target dirs", []string{"-b", "x", "--", "true"}, "Must specify at least one target dir"},
+		{"no target dirs", []string{"-b", "x", "--", "true"}, "must specify at least one target dir"},
 		{"no branch", []string{"/tmp", "--", "true"}, "-b/--branch is required"},
 		{"no command", []string{"/tmp", "-b", "x"}, "no command specified"},
 		{"empty command after separator", []string{"/tmp", "-b", "x", "--"}, "no command specified"},
@@ -85,6 +85,16 @@ func TestParseArgsFlagForms(t *testing.T) {
 			want: config{branch: "x", message: "msg", title: "title", body: "body", reviewer: "alice"},
 		},
 		{
+			name: "draft short form",
+			args: []string{"/tmp", "-b", "x", "-d", "--", "true"},
+			want: config{branch: "x", draft: true},
+		},
+		{
+			name: "draft long form",
+			args: []string{"/tmp", "-b", "x", "--draft", "--", "true"},
+			want: config{branch: "x", draft: true},
+		},
+		{
 			name: "flags before the target dir",
 			args: []string{"-b", "x", "-v", "/tmp", "--", "true"},
 			want: config{branch: "x", verbose: true},
@@ -114,6 +124,9 @@ func TestParseArgsFlagForms(t *testing.T) {
 			}
 			if cfg.reviewer != tt.want.reviewer {
 				t.Errorf("reviewer = %q, want %q", cfg.reviewer, tt.want.reviewer)
+			}
+			if cfg.draft != tt.want.draft {
+				t.Errorf("draft = %v, want %v", cfg.draft, tt.want.draft)
 			}
 			if cfg.verbose != tt.want.verbose {
 				t.Errorf("verbose = %v, want %v", cfg.verbose, tt.want.verbose)

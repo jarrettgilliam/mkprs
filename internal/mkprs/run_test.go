@@ -102,6 +102,20 @@ func TestRunPullRequestFields(t *testing.T) {
 		}
 	})
 
+	t.Run("-d asks for a draft PR", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("x")
+		prs := &fakePR{}
+
+		run(t, prs, []string{f.targets, "-b", "b", "-m", "msg", "-d"}, helperCmd(t, "write", "file.txt", "x")...)
+
+		if !prs.only(t).pr.Draft {
+			t.Error("Draft = false, want true")
+		}
+	})
+
 	// The base follows the repo rather than a hardcoded "main": a PR against a
 	// branch the repo does not have would be rejected by GitHub outright.
 	t.Run("base is the repo's own default branch", func(t *testing.T) {

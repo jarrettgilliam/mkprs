@@ -15,6 +15,7 @@ type pullRequest struct {
 	Title    string
 	Body     string
 	Reviewer string
+	Draft    bool
 }
 
 // prOpener opens a pull request and returns its URL. Everything the attempt
@@ -39,6 +40,9 @@ func ghArgs(pr pullRequest) []string {
 	}
 	if pr.Reviewer != "" {
 		args = append(args, "--reviewer", pr.Reviewer)
+	}
+	if pr.Draft {
+		args = append(args, "--draft")
 	}
 	return args
 }

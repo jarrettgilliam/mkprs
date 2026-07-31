@@ -39,6 +39,19 @@ func TestGhArgs(t *testing.T) {
 			},
 		},
 		{
+			// --draft is a bare flag; gh takes no value for it.
+			name: "as a draft",
+			pr:   pullRequest{Base: "main", Head: "fix", Title: "Fix it", Body: "why", Draft: true},
+			want: []string{
+				"pr", "create",
+				"--base", "main",
+				"--head", "fix",
+				"--title", "Fix it",
+				"--body", "why",
+				"--draft",
+			},
+		},
+		{
 			// gh prompts interactively without --body, which would hang a batch
 			// run, so it is passed even when empty.
 			name: "empty body is still passed",

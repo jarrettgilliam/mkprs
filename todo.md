@@ -13,13 +13,6 @@ Entries are unnumbered so nothing has to be renumbered as they come and go.
 
 ## Pull requests
 
-- **`-d, --draft` to open draft PRs.** The natural default for a batch run: 30
-  PRs opened by a script are exactly the case where you want to look before
-  anyone is notified. A bool field on `pullRequest` plus one line in `ghArgs`
-  (`internal/mkprs/pr.go`) — `gh pr create --draft` takes no value.
-
-  `-d` is free (taken: `-b -m -t -B -r -v -h`).
-
 - **`-r` accepts only one reviewer.** `gh` itself takes comma-separated
   reviewers and supports `--label`, `--assignee`, `--milestone`.
   Allow `-r alice,bob` (verify it already passes through, then document it) and
