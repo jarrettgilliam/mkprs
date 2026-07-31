@@ -77,7 +77,7 @@ func (a *app) run() int {
 		name := filepath.Base(repoPath)
 		c := newCapture(name, a.cfg.verbose, a.out)
 
-		res := a.attemptRunCommand(repoPath, c)
+		res := a.processRepo(repoPath, c)
 		c.flush()
 
 		switch o := res.(type) {

@@ -49,13 +49,9 @@ func (a *app) openPR(repoPath, base string, c *capture) outcome {
 	return success(url)
 }
 
-// attemptRunCommand runs one repo to a conclusion: the pre-flight filters, the
+// processRepo runs one repo to a conclusion: the pre-flight filters, the
 // user's command, the commit and push, then the pull request.
-//
-// The signature is the guarantee. Every path has to return an outcome -- Go
-// will not compile a function that falls off the end -- so no repo can finish
-// unclassified.
-func (a *app) attemptRunCommand(repoPath string, c *capture) outcome {
+func (a *app) processRepo(repoPath string, c *capture) outcome {
 	cfg := a.cfg
 	repoName := filepath.Base(repoPath)
 
