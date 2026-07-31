@@ -50,11 +50,14 @@ Examples:
   # Fix a typo, with an explicit commit message
   mkprs ~/repos -b fix-typo -m "Fix typo in README" -- sed -i '' 's/teh/the/g' README.md
 
+  # Apply a patch file -- give an absolute path, the command runs in the repo
+  mkprs ~/repos -b apply-fix -- git apply /tmp/fix.patch
+
   # Anything needing a shell goes through bash -c
   mkprs ~/repos -b lint -- bash -c 'npm ci && npm run lint:fix'
 
   # A tool that insists on an explicit path
-  mkprs ~/repos -b scan -- some-tool --root {}
+  mkprs ~/repos -b scan -- cp /example/file {}
 `
 
 func printUsage(w io.Writer, fs *pflag.FlagSet) {
