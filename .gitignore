@@ -1,5 +1,13 @@
 # Build output from `go build -o mkprs .`.
 /mkprs
+/mkprs.exe
 
 # JetBrains stuff
 /.idea/
+
+# macOS Finder metadata
+.DS_Store
+
+# `go test -c` binaries and coverage profiles
+*.test
+coverage.out
