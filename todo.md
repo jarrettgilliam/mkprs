@@ -13,10 +13,6 @@ Entries are unnumbered so nothing has to be renumbered as they come and go.
 
 ## Scale & operability
 
-- **`--keep-branch` / `--no-cleanup`.** The local branch is always deleted after
-  the PR is opened; sometimes you want it for follow-up edits. Skips the
-  `git branch -D` in `restoreRepo`.
-
 - **Start from any branch, and return to it.** Today a repo not on its default
   branch is skipped (`run.go:58`). That guard exists only because cleanup hard-codes
   where to go back to — but the working branch is cut from `resolveBase`, i.e.
@@ -297,9 +293,33 @@ itself.
   committing act on whatever HEAD points at, so a command that runs
   `git checkout` would have its work committed to a branch mkprs does not own —
   or, if it landed on the default branch, pushed straight to `main`. Any switch,
-  and a detached HEAD, fails that repo. Cleanup still deletes only mkprs's own
-  branch, so whatever the command created survives with its commits for the user
-  to pick up.
+  and a detached HEAD, fails that repo — and since a failure is not cleaned up,
+  everything it created survives, mkprs's own branch included.
+
+- **A failed repo is not cleaned up at all.** Cleanup is all or nothing: the
+  checkout back to the default branch is what makes deleting the branch safe, and
+  on its own it is actively harmful. mkprs's branch is cut from the default
+  branch, so nothing conflicts and `git checkout` carries the command's
+  uncommitted edits across with it — they end up stranded as dirty state on the
+  default branch while the branch that explains them is deleted. Measured, not
+  assumed: a modified file and an untracked one both follow the checkout.
+
+  So a failure leaves branch, commits and working tree exactly as they were. The
+  push failure is the case that proves it — origin has no copy, so deleting the
+  branch there is the one path that genuinely destroys work — but the rule is
+  uniform across every failure rather than one rule per step. The repo sitting on
+  mkprs's branch is also the signal that it needs attention.
+
+  Skips still clean up: "command made no changes" leaves nothing worth keeping.
+
+- **`-k` skips cleanup entirely, and there is no second flag for staying on the
+  branch.** Keeping the branch but checking out the default one was considered
+  and dropped for the reason above: the checkout drags uncommitted edits with it,
+  so "keep the branch, restore the repo" is not a coherent halfway house. Not
+  having to `git checkout` is most of the point anyway — the branch is on origin
+  once the PR is open, so `git checkout -b <branch> origin/<branch>` recovers a
+  deleted one nearly as cheaply as `-k` avoids it, and a flag that only means
+  something alongside another flag would be earning very little.
 
 - **No `--label`, `--assignee` or `--milestone` passthrough.** `gh pr create`
   supports all three and each is a one-line addition to `ghArgs`, but they are

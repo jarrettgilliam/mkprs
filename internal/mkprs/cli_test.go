@@ -85,6 +85,11 @@ func TestParseArgsFlagForms(t *testing.T) {
 			want: config{branch: "x", message: "msg", title: "title", body: "body", reviewers: "alice"},
 		},
 		{
+			name: "keep-branch short form",
+			args: []string{"/tmp", "-b", "x", "-k", "--", "true"},
+			want: config{branch: "x", keepBranch: true},
+		},
+		{
 			name: "several reviewers",
 			args: []string{"/tmp", "-b", "x", "-r", "alice,bob", "--", "true"},
 			want: config{branch: "x", reviewers: "alice,bob"},
@@ -132,6 +137,9 @@ func TestParseArgsFlagForms(t *testing.T) {
 			}
 			if cfg.draft != tt.want.draft {
 				t.Errorf("draft = %v, want %v", cfg.draft, tt.want.draft)
+			}
+			if cfg.keepBranch != tt.want.keepBranch {
+				t.Errorf("keepBranch = %v, want %v", cfg.keepBranch, tt.want.keepBranch)
 			}
 			if cfg.verbose != tt.want.verbose {
 				t.Errorf("verbose = %v, want %v", cfg.verbose, tt.want.verbose)

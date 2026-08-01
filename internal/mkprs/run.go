@@ -28,7 +28,10 @@ func (a *app) openPR(repoPath, base string, c *capture) outcome {
 
 // processRepo runs one repo to a conclusion: the pre-flight filters, the
 // user's command, the commit and push, then the pull request.
-func (a *app) processRepo(repoPath string, c *capture) outcome {
+//
+// The result is named because cleanup is deferred and has to see it: a repo
+// that failed is left exactly as it broke.
+func (a *app) processRepo(repoPath string, c *capture) (res outcome) {
 	cfg := a.cfg
 	repoName := filepath.Base(repoPath)
 
@@ -80,9 +83,25 @@ func (a *app) processRepo(repoPath string, c *capture) outcome {
 	if err := gitTo(repoPath, c, "checkout", "-b", cfg.branch, base, "--quiet"); err != nil {
 		return fail("could not create branch", c)
 	}
-	// The branch exists from here on, so restore the repo however we leave --
-	// including the success path, where this runs after the PR is opened.
-	defer restoreRepo(repoPath, defaultBranch, cfg.branch, c)
+	// The branch exists from here on, so the repo needs restoring however we
+	// leave -- including the success path, where this runs after the PR is
+	// opened. Two cases opt out, and both mean "leave it alone" rather than
+	// "delete the branch but stay put": cleanup is all or nothing, because
+	// checking out the default branch drags any uncommitted edits along with it.
+	//
+	// A failure is left exactly as it broke, so nothing is lost to a problem the
+	// user has not seen yet: a failed push means origin has no copy of the
+	// commit, and a command that failed halfway leaves edits worth reading. The
+	// repo sitting on mkprs's branch is also the signal that it needs attention.
+	defer func() {
+		if cfg.keepBranch {
+			return
+		}
+		if _, broke := res.(outcomeFailed); broke {
+			return
+		}
+		restoreRepo(repoPath, defaultBranch, cfg.branch, c)
+	}()
 
 	cmd := exec.Command(expanded[0], expanded[1:]...)
 	cmd.Dir = repoPath

@@ -21,9 +21,9 @@ type outcomeSkipped struct{ reason string }
 
 type outcomeFailed struct {
 	reason string
-	// c is the repo's output, replayed under the ❌ line. It is still being
-	// written to when this outcome is built: the deferred restoreRepo runs
-	// before the caller reports, so cleanup errors land in the replay.
+	// c is the repo's output, replayed under the ❌ line. Nothing writes to it
+	// after this outcome is built: a failure skips cleanup, so the capture is
+	// complete by the time the caller reports.
 	c *capture
 }
 

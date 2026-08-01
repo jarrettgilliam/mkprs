@@ -365,31 +365,38 @@ func TestRunRefusesABranchSwitch(t *testing.T) {
 		setup   func(t *testing.T, f *fixture, repo string)
 		command func(t *testing.T) []string
 		want    string
+		// wantHead is where the repo is left: wherever the command put it. This
+		// is a failure, and a failure is not cleaned up.
+		wantHead string
 	}{
 		{
-			name:    "a branch the command creates and commits to",
-			command: func(t *testing.T) []string { return helperCmd(t, "gitcheckout", "other", "file.txt", "by the command") },
-			want:    "command left the repo on 'other', not 'b'",
+			name:     "a branch the command creates and commits to",
+			command:  func(t *testing.T) []string { return helperCmd(t, "gitcheckout", "other", "file.txt", "by the command") },
+			want:     "command left the repo on 'other', not 'b'",
+			wantHead: "other",
 		},
 		{
 			name: "a pre-existing branch",
 			setup: func(t *testing.T, f *fixture, repo string) {
 				gitCmd(t, repo, "branch", "other")
 			},
-			command: func(t *testing.T) []string { return helperCmd(t, "gitcheckout", "other") },
-			want:    "command left the repo on 'other', not 'b'",
+			command:  func(t *testing.T) []string { return helperCmd(t, "gitcheckout", "other") },
+			want:     "command left the repo on 'other', not 'b'",
+			wantHead: "other",
 		},
 		{
 			// Without this the run would commit straight to the default branch
 			// and push it, bypassing review entirely.
-			name:    "the default branch",
-			command: func(t *testing.T) []string { return helperCmd(t, "gitcheckout", "main", "file.txt", "sneaky") },
-			want:    "command left the repo on 'main', not 'b'",
+			name:     "the default branch",
+			command:  func(t *testing.T) []string { return helperCmd(t, "gitcheckout", "main", "file.txt", "sneaky") },
+			want:     "command left the repo on 'main', not 'b'",
+			wantHead: "main",
 		},
 		{
-			name:    "a detached HEAD",
-			command: func(t *testing.T) []string { return helperCmd(t, "gitdetach") },
-			want:    "command left the repo with a detached HEAD",
+			name:     "a detached HEAD",
+			command:  func(t *testing.T) []string { return helperCmd(t, "gitdetach") },
+			want:     "command left the repo with a detached HEAD",
+			wantHead: "HEAD", // what --abbrev-ref reports when detached
 		},
 	}
 
@@ -427,19 +434,21 @@ func TestRunRefusesABranchSwitch(t *testing.T) {
 			if got := f.remoteSubject("x", "main"); got != mainBefore {
 				t.Errorf("origin/main moved to %q, want it untouched at %q", got, mainBefore)
 			}
-			// mkprs cleans up only after itself.
-			if localHasBranch(t, repo, "b") {
-				t.Error("mkprs's own branch should have been deleted")
+			// Nothing is cleaned up, mkprs's own branch included: the failure is
+			// left standing where it happened for the user to sort out.
+			if !localHasBranch(t, repo, "b") {
+				t.Error("mkprs's own branch should have been left in place")
 			}
-			if got := currentBranch(t, repo); got != "main" {
-				t.Errorf("left on branch %q, want main", got)
+			if got := currentBranch(t, repo); got != tt.wantHead {
+				t.Errorf("left on %q, want %q", got, tt.wantHead)
 			}
 		})
 	}
 }
 
 // A branch the command created is the user's, and survives the failure with its
-// commit intact -- cleanup only ever deletes the branch mkprs made.
+// commit intact. Cleanup would only ever have deleted the branch mkprs made,
+// and on a failure it does not run at all.
 func TestRunLeavesTheCommandsBranchAlone(t *testing.T) {
 	t.Parallel()
 
@@ -616,9 +625,14 @@ func TestRunFailures(t *testing.T) {
 		if len(prs.calls) != 0 {
 			t.Error("a failing command should not open a PR")
 		}
-		// The half-finished branch is cleaned up.
-		if localHasBranch(t, repo, "b") {
-			t.Error("the working branch should have been deleted")
+		// A failure is left exactly as it broke: still on the branch, branch
+		// still there. Cleanup would have to check out the default branch, and
+		// that drags whatever the command wrote across with it.
+		if !localHasBranch(t, repo, "b") {
+			t.Error("the working branch should have been left in place")
+		}
+		if got := currentBranch(t, repo); got != "b" {
+			t.Errorf("left on branch %q, want b", got)
 		}
 	})
 
@@ -641,11 +655,16 @@ func TestRunFailures(t *testing.T) {
 		if len(prs.calls) != 0 {
 			t.Error("a failed push should not open a PR")
 		}
-		if localHasBranch(t, repo, "b") {
-			t.Error("the working branch should have been deleted")
+		// Nothing else has the commit -- the push is what failed -- so deleting
+		// the branch here would be the one case that actually loses work.
+		if !localHasBranch(t, repo, "b") {
+			t.Fatal("the working branch should have been left in place")
 		}
-		if got := currentBranch(t, repo); got != "main" {
-			t.Errorf("left on branch %q, want main", got)
+		if got, want := gitCmd(t, repo, "show", "b:file.txt"), "changed"; got != want {
+			t.Errorf("file on the surviving branch = %q, want %q", got, want)
+		}
+		if got := currentBranch(t, repo); got != "b" {
+			t.Errorf("left on branch %q, want b", got)
 		}
 	})
 
@@ -669,8 +688,77 @@ func TestRunFailures(t *testing.T) {
 		if !f.remoteHasBranch("x", "b") {
 			t.Error("the pushed branch should survive a PR failure")
 		}
+		// And locally too. The push succeeded, so this one is recoverable either
+		// way, but a failure gets the same treatment wherever it happens rather
+		// than a rule per step.
+		if !localHasBranch(t, repo, "b") {
+			t.Error("the local branch should have been left in place")
+		}
+	})
+}
+
+// -k skips cleanup outright rather than skipping only the delete: the repo is
+// left on the branch, ready to carry on in.
+func TestRunKeepBranch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a successful repo is left on its branch", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "b", "-k", "-m", "msg"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if got.code != exitOK {
+			t.Errorf("exit code = %d, want %d", got.code, exitOK)
+		}
+		if len(prs.calls) != 1 {
+			t.Errorf("opened %d PRs, want 1 -- -k is about cleanup, nothing else", len(prs.calls))
+		}
+		if !localHasBranch(t, repo, "b") {
+			t.Fatal("the working branch should have been kept")
+		}
+		if got := currentBranch(t, repo); got != "b" {
+			t.Errorf("left on branch %q, want b", got)
+		}
+	})
+
+	// Uniform, so there is one rule to remember rather than one per outcome --
+	// even though the branch a skip leaves behind carries no commits.
+	t.Run("a skipped repo keeps its branch too", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "b", "-k"}, helperCmd(t, "noop")...)
+
+		if !strings.Contains(got.stdout, "skipped: command made no changes") {
+			t.Errorf("stdout = %q, want the no-changes skip", got.stdout)
+		}
+		if !localHasBranch(t, repo, "b") {
+			t.Error("the working branch should have been kept")
+		}
+	})
+
+	// Without -k the default holds: restored and deleted.
+	t.Run("without -k a successful repo is restored", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		prs := &fakePR{}
+
+		run(t, prs, []string{f.targets, "-b", "b", "-m", "msg"}, helperCmd(t, "write", "file.txt", "changed")...)
+
 		if localHasBranch(t, repo, "b") {
-			t.Error("the local branch should still be cleaned up")
+			t.Error("the working branch should have been deleted")
+		}
+		if got := currentBranch(t, repo); got != "main" {
+			t.Errorf("left on branch %q, want main", got)
 		}
 	})
 }

@@ -126,7 +126,12 @@ func branchAhead(repoPath, base, branch string) (ahead, ok bool) {
 	return out != "0", true
 }
 
-// restoreRepo abandons the working branch and returns the repo to dflt.
+// restoreRepo abandons the working branch and returns the repo to dflt. The
+// checkout and the delete go together on purpose: checking out dflt with the
+// command's uncommitted edits still in the tree carries them across (the
+// branch was cut from dflt, so nothing conflicts to stop it), which would
+// leave those edits stranded on dflt after the branch is gone. Callers that do
+// not want the branch deleted must not call this at all.
 func restoreRepo(repoPath, dflt, branch string, w io.Writer) {
 	_ = gitTo(repoPath, w, "checkout", dflt, "--quiet")
 	// Matches the original's `git branch -D ... >/dev/null`: the "Deleted

@@ -17,6 +17,7 @@ type config struct {
 	body       string
 	reviewers  string
 	draft      bool
+	keepBranch bool
 	verbose    bool
 	command    []string
 }
@@ -44,6 +45,12 @@ repo is skipped when it is not on that branch, its working tree is dirty, the
 branch already exists, the command leaves no changes behind, or origin is not a
 GitHub remote. The command must leave the repo on the branch mkprs created -- one
 that switches branches fails that repo, leaving its work in place.
+
+A repo that succeeds or is skipped is returned to the branch it started on and
+mkprs's branch is deleted; -k keeps that branch and leaves the repo on it. A repo
+that fails is never cleaned up -- its branch, commits and any uncommitted edits
+stay exactly as the failure left them, so nothing is lost and the repo itself
+shows which ones need attention.
 
 Examples:
   # Bump NuGet dependencies everywhere
@@ -89,6 +96,7 @@ func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
 	fs.StringVarP(&cfg.body, "body", "B", "", "PR `body` description (default: empty)")
 	fs.StringVarP(&cfg.reviewers, "reviewer", "r", "", "Comma-separated `users` or org/team handles to request review from")
 	fs.BoolVarP(&cfg.draft, "draft", "d", false, "Open the pull requests as drafts")
+	fs.BoolVarP(&cfg.keepBranch, "keep-branch", "k", false, "Leave each repo checked out on the branch instead of deleting it")
 	fs.BoolVarP(&cfg.verbose, "verbose", "v", false, "Stream command output live, prefixed by repo name")
 	// pflag handles an undeclared --help itself, but only a declared one shows
 	// up in the Options block. Declaring it and raising pflag's own sentinel
