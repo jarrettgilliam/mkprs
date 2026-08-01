@@ -440,6 +440,18 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+// readFile is the working-tree counterpart to fixture.remoteFile, for the tests
+// that stop before anything is committed. It does not trim: a helper mode that
+// writes a trailing newline and one that does not are different results.
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(b)
+}
+
 // =============================================================================
 // Running mkprs in-process
 // =============================================================================

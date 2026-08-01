@@ -32,12 +32,15 @@ Entries are unnumbered so nothing has to be renumbered as they come and go.
   - **Require a TTY.** If stdin is not a terminal, fail at startup with a clear
     message rather than at the first prompt. `mkprs -i ... | tee log` from cron
     must not hang waiting for a keypress it can never receive.
-  - **stdin is already free.** `cmd.Stdin` is never set (`run.go:103`), so the
-    command runs against `/dev/null` and cannot swallow keystrokes meant for the
-    prompt. Keep it that way.
-  - **`n` is destructive.** Skipping falls through to the existing
-    `defer restoreRepo`, which checks out the default branch and deletes the
-    working branch — the command's work is gone. Say so at the prompt, and treat
+  - **stdin is already free.** `cmd.Stdin` is never set (`runCommand`,
+    `run.go:137`), so the command runs against `/dev/null` and cannot swallow
+    keystrokes meant for the prompt. Keep it that way.
+  - **The prompt has a seam to land in.** `processRepo` now calls `runCommand`
+    and then `commitAndPush`; the pause goes between the two, with nothing to
+    disentangle first.
+  - **`n` is destructive.** Skipping falls through to `a.cleanup`, which checks
+    out the branch the repo started on and deletes the working branch — the
+    command's work is gone. Say so at the prompt, and treat
     `--keep-branch` as the escape hatch for "I want to look at this properly".
   - **`a` is just a latch**, a bool that suppresses later prompts. `q` needs to
     stop the loop cleanly, letting the current repo's cleanup run.
@@ -110,7 +113,9 @@ know it would. Opt-out, not opt-in.
   every repo behind it. Run under `exec.CommandContext` with
   `context.WithTimeout`; expiry is a normal per-repo failure
   (`command timed out after 10m`), so the run continues and cleanup still fires
-  through the existing `defer restoreRepo`. `--timeout <duration>` overrides,
+  through the existing `defer a.cleanup`. `runCommand` is the whole surface this
+  touches: it already returns the error `processRepo` turns into that failure.
+  `--timeout <duration>` overrides,
   `--timeout 0` disables. 10 minutes is chosen to sit well clear of a slow-but-real
   `npm ci` or `dotnet restore` while still catching a wedged process the same
   afternoon; tune it once there is evidence, but do not ship it unset.
@@ -151,7 +156,7 @@ know it would. Opt-out, not opt-in.
     a buffer and stderr into the error, so neither stream can reach the console at
     any verbosity. That is `originURL`, `isCleanTree`, `getDefaultBranch`,
     `branchLocation`, `resolveBase`, `headBranch`, `branchAhead`, and the
-    `diff --cached --quiet` check at `run.go:133` — i.e. every filter that decides
+    `diff --cached --quiet` check at `run.go:176` — i.e. every filter that decides
     a repo's fate. Their stdout *is* the return value, which is the argument for
     swallowing it, but it is also the answer the user wants: `status --porcelain`
     is precisely the list of files that made a repo skip as "working tree not
@@ -211,8 +216,9 @@ know it would. Opt-out, not opt-in.
   must never be built into anything traceable. Worth a test that fixes this at
   the seam rather than a rule to remember.
 
-  **Sequencing**: after *`processRepo` is 127 lines* below, since the echo lands
-  next to every step in that function's spine.
+  Most of the filters listed above now live in `preflight`, which is a contiguous
+  block rather than six statements scattered through `processRepo` — so the trace
+  lines land in one place.
 
 - **`--tracked-only` staging.** `git add -A` stages everything the command left
   behind, including new files. That is the right default (tools like
@@ -448,7 +454,7 @@ tests, not from having two production implementations.
   | `mkprs.go` field | `app.errw` | `errOut` |
   | `git.go` params | `gitTo(…, w io.Writer)`, `gitErrTo(…, w)`, `fetchOrigin(…, w)`, `restoreRepo(…, w)` | `log` |
   | `git.go` param | `resolveBase(repoPath, dflt)` | `defaultBranch` |
-  | `run.go` params | `processRepo(…, c *capture)`, `openPR(…, c *capture)` | `output` |
+  | `run.go` params | `c *capture`, in all six of `processRepo`, `openPR`, `preflight`, `cleanup`, `runCommand`, `commitAndPush` | `output` |
   | `cli.go` param | `printUsage(w io.Writer, fs *pflag.FlagSet)` | `out`, `flags` |
 
   `outcomeFailed.c` is the one that proves the point: it carries a three-line
@@ -464,40 +470,6 @@ tests, not from having two production implementations.
   wearing a disguise. A `repo` type with `r.git(…)` would delete that parameter
   from fourteen signatures in `git.go` alone. Attractive, and much larger than it
   looks — worth doing only if the file grows again.
-
-- **`processRepo` is 127 lines** (`run.go:34`). It is the only function in the
-  package over 100; `parseArgs` (52, `cli.go:84`) and `app.run` (41,
-  `mkprs.go:55`) are the next two and both are fine. So this is one function, not
-  a sweep.
-
-  What makes it long is that it is a pipeline of a dozen steps, each of which can
-  end the repo, and the early returns are the control flow. Extraction fights
-  that: a helper that can stop the pipeline has to return an `outcome`, and
-  `nil`-means-carry-on reintroduces a meaningful nil that `outcome`'s
-  constructors otherwise rule out — `run()` already has to defend against
-  `processRepo` returning nil.
-
-  So split only where a piece has one exit:
-
-  - **`expandCommand(command []string, repoPath string) []string`** — the `{}`
-    substitution loop. Pure, no outcome, and currently only reachable through a
-    full end-to-end run; as a function it is a table test.
-  - **The pre-flight filters** (remote, clean tree, fetch, default branch, head,
-    branch free) are a contiguous block that ends either "skip" or "here is the
-    base to cut from". One `outcome` return, one data return — the nil question
-    confined to a single call site instead of spread across six.
-  - **The deferred cleanup closure** is ~20 lines of comment and predicate now
-    that failures opt out. As `func (a *app) cleanup(res outcome, …)` it can be
-    tested directly rather than through a repo that fails on purpose.
-
-  That leaves the commit → push → open spine linear, which is the part worth
-  reading top to bottom.
-
-  **Sequencing**: do this before `-i` and `--timeout`, not after. Both edit the
-  middle of this function — the prompt lands between the command and the staging,
-  the timeout wraps the command — and both are easier to review against a spine
-  than against a 127-line body. The *Spell out names* table above also renames
-  this function's `c` parameter; whichever lands second inherits a smaller diff.
 
 - **Trailing-flag robustness**: `mkprs tgt -b -- true` silently takes `--` as the
   branch name, then fails with "no command specified" because the terminator was

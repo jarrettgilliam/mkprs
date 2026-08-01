@@ -2,7 +2,11 @@ package mkprs
 
 import (
 	"errors"
+	"io"
+	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -140,58 +144,6 @@ func TestRunPullRequestFields(t *testing.T) {
 			t.Errorf("pushed file = %q, want %q", got, want)
 		}
 	})
-}
-
-// The command sees the repo as its working directory, its path via {} and
-// $REPO, and its name via $REPO_NAME.
-func TestRunCommandContext(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		command func(t *testing.T) []string
-		want    func(repo string) string
-	}{
-		{
-			name:    "{} becomes the repo path",
-			command: func(t *testing.T) []string { return helperCmd(t, "args", "out.txt", "{}") },
-			want:    func(repo string) string { return resolvePath(repo) + "\n" },
-		},
-		{
-			name:    "REPO is the absolute path",
-			command: func(t *testing.T) []string { return helperCmd(t, "env", "out.txt", "REPO") },
-			want:    func(repo string) string { return resolvePath(repo) + "\n" },
-		},
-		{
-			name:    "REPO_NAME is the basename",
-			command: func(t *testing.T) []string { return helperCmd(t, "env", "out.txt", "REPO_NAME") },
-			want:    func(repo string) string { return filepath.Base(repo) + "\n" },
-		},
-		{
-			name:    "the working directory is the repo root",
-			command: func(t *testing.T) []string { return helperCmd(t, "pwd", "out.txt") },
-			want:    func(repo string) string { return resolvePath(repo) + "\n" },
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			f := newFixture(t)
-			repo := f.repo("x")
-			prs := &fakePR{}
-
-			got := run(t, prs, []string{f.targets, "-b", "b"}, tt.command(t)...)
-			if len(prs.calls) != 1 {
-				t.Fatalf("no PR opened; output:\n%s", got.all())
-			}
-
-			if got, want := f.remoteFile("x", "b", "out.txt")+"\n", tt.want(repo); got != want {
-				t.Errorf("out.txt = %q, want %q", got, want)
-			}
-		})
-	}
 }
 
 func TestRunStagesEveryChange(t *testing.T) {
@@ -483,6 +435,11 @@ func TestRunLeavesTheCommandsBranchAlone(t *testing.T) {
 }
 
 // Skips are normal outcomes, not errors: the run still exits 0.
+//
+// Which conditions skip is settled by TestPreflight and TestCommitAndPush. What
+// needs a whole run is what happens afterwards, and that does not vary by
+// reason -- so this keeps one row from each of the two places a skip can come
+// from, rather than one per condition.
 func TestRunSkips(t *testing.T) {
 	t.Parallel()
 
@@ -493,21 +450,7 @@ func TestRunSkips(t *testing.T) {
 		want    string
 	}{
 		{
-			name: "non-GitHub remote",
-			setup: func(t *testing.T, f *fixture) string {
-				return f.repoWithRemote("x", "git@gitlab.com:fake/x.git")
-			},
-			want: "skipped: non-GitHub remote",
-		},
-		{
-			name: "no origin at all",
-			setup: func(t *testing.T, f *fixture) string {
-				return f.plainRepo("x")
-			},
-			want: "skipped: no 'origin' remote",
-		},
-		{
-			name: "dirty working tree",
+			name: "before the command runs",
 			setup: func(t *testing.T, f *fixture) string {
 				repo := f.repo("x")
 				writeFile(t, filepath.Join(repo, "file.txt"), "uncommitted\n")
@@ -516,26 +459,10 @@ func TestRunSkips(t *testing.T) {
 			want: "skipped: working tree not clean",
 		},
 		{
-			name: "branch already exists locally",
-			setup: func(t *testing.T, f *fixture) string {
-				repo := f.repo("x")
-				gitCmd(t, repo, "branch", "b")
-				return repo
-			},
-			want: "skipped: branch 'b' already exists locally",
-		},
-		{
-			name: "branch already exists on origin",
-			setup: func(t *testing.T, f *fixture) string {
-				repo := f.repo("x")
-				gitCmd(t, repo, "push", "-q", "origin", "HEAD:refs/heads/b")
-				gitCmd(t, repo, "fetch", "-q", "origin")
-				return repo
-			},
-			want: "skipped: branch 'b' already exists on origin",
-		},
-		{
-			name: "command made no changes",
+			// The other source, and the one that reaches cleanup with a branch
+			// already cut: the run gets as far as committing before deciding
+			// there is nothing to open a PR for.
+			name: "after the command runs",
 			setup: func(t *testing.T, f *fixture) string {
 				return f.repo("x")
 			},
@@ -973,5 +900,536 @@ func TestRunSummaryCountsEveryState(t *testing.T) {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("summary missing %q:\n%s", want, got.stdout)
 		}
+	}
+}
+
+// =============================================================================
+// The pieces of processRepo, tested directly
+//
+// Everything above drives a whole run, which is the only way to test a step
+// that lives inside a 127-line function. These have one exit each, so they can
+// be called on their own -- and the cases that are awkward to stage as a repo
+// become rows in a table.
+//
+// The tests above are what is left once that is possible: the wiring, the
+// reporting, and the interactions between steps. A condition that only decides
+// one step's answer belongs down here, where it costs a fixture instead of a
+// full run.
+// =============================================================================
+
+// {} substitution was reachable only through TestRunCommandContext, which
+// builds a repo, runs a command and reads the pushed commit back to prove a
+// loop over strings works. These rows cost nothing, and two of them -- {} twice
+// over, and {} inside a larger argument -- are cases no single command line can
+// stage.
+func TestExpandCommand(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command []string
+		want    []string
+	}{
+		{
+			name:    "no placeholder",
+			command: []string{"echo", "hello"},
+			want:    []string{"echo", "hello"},
+		},
+		{
+			name:    "the placeholder alone",
+			command: []string{"cp", "/example/file", "{}"},
+			want:    []string{"cp", "/example/file", "/repo"},
+		},
+		{
+			name:    "every occurrence, not just the first",
+			command: []string{"diff", "{}", "{}"},
+			want:    []string{"diff", "/repo", "/repo"},
+		},
+		{
+			// Only an argument that is exactly {} substitutes, which is what
+			// usageTail promises. A command meaning those two characters
+			// literally has no escape, so the rule has to stay this narrow.
+			name:    "an argument that merely contains it",
+			command: []string{"echo", "{}/sub", "a{}b", "{ }", "{}}"},
+			want:    []string{"echo", "{}/sub", "a{}b", "{ }", "{}}"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := expandCommand(tt.command, "/repo")
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("expandCommand(%q) = %q, want %q", tt.command, got, tt.want)
+			}
+			// The caller's slice is reused for the next repo, so writing
+			// through it would leave the second repo's command holding the
+			// first repo's path.
+			if tt.command[len(tt.command)-1] == "{}" && got[len(got)-1] == tt.command[len(tt.command)-1] {
+				t.Error("expandCommand substituted in place")
+			}
+		})
+	}
+}
+
+// preflight is every filter that can end a repo before its command runs, plus
+// the three branch names the rest of processRepo needs.
+func TestPreflight(t *testing.T) {
+	t.Parallel()
+
+	// What is only visible here is the data return: a repo that passes hands
+	// back three names that are all distinct from one another.
+	t.Run("a repo that passes", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		// Somewhere other than the default branch, so startBranch cannot pass
+		// by accidentally agreeing with defaultBranch.
+		gitCmd(t, repo, "checkout", "-q", "-b", "feature")
+
+		p, res := preflight(repo, "b", newCapture("x", false, io.Discard))
+		if res != nil {
+			t.Fatalf("preflight = %#v, want it to carry on", res)
+		}
+		if got, want := p.defaultBranch, "main"; got != want {
+			t.Errorf("defaultBranch = %q, want %q", got, want)
+		}
+		if got, want := p.startBranch, "feature"; got != want {
+			t.Errorf("startBranch = %q, want %q", got, want)
+		}
+		// The remote-tracking ref, so the branch is cut from what origin has.
+		if got, want := p.base, "origin/main"; got != want {
+			t.Errorf("base = %q, want %q", got, want)
+		}
+	})
+
+	// Every way a repo can stop here. These used to be rows in TestRunSkips,
+	// each paying for a whole run -- discovery, a command, a fake PR opener --
+	// to reach a decision made before any of that happens. TestRunSkips keeps
+	// one, since how a skip is reported does not vary by reason.
+	//
+	// Being one table is also what makes the set legible: "could not determine
+	// default branch" had no test at all, and its absence was invisible while
+	// these were scattered.
+	stops := []struct {
+		name  string
+		setup func(t *testing.T, f *fixture) string // returns the repo path
+		want  string
+	}{
+		{
+			name: "non-GitHub remote",
+			setup: func(t *testing.T, f *fixture) string {
+				return f.repoWithRemote("x", "git@gitlab.com:fake/x.git")
+			},
+			want: "non-GitHub remote (git@gitlab.com:fake/x.git)",
+		},
+		{
+			name: "no origin at all",
+			setup: func(t *testing.T, f *fixture) string {
+				return f.plainRepo("x")
+			},
+			want: "no 'origin' remote",
+		},
+		{
+			name: "dirty working tree",
+			setup: func(t *testing.T, f *fixture) string {
+				repo := f.repo("x")
+				writeFile(t, filepath.Join(repo, "file.txt"), "uncommitted\n")
+				return repo
+			},
+			want: "working tree not clean",
+		},
+		{
+			// Only reachable when the fetch fails: git recreates origin/HEAD
+			// on a successful one, so preflight would otherwise heal this
+			// between deleting the ref and reading it. Origin still says
+			// github.com -- the repo gets this far -- but there is nothing
+			// behind it any more and no cached refs to fall back on.
+			name: "no discoverable default branch",
+			setup: func(t *testing.T, f *fixture) string {
+				repo := f.repo("x")
+				if err := os.RemoveAll(f.bare("x")); err != nil {
+					t.Fatalf("remove the remote: %v", err)
+				}
+				// --no-deref, or this deletes origin/main instead: origin/HEAD
+				// is a symref pointing at it.
+				gitCmd(t, repo, "update-ref", "--no-deref", "-d", "refs/remotes/origin/HEAD")
+				gitCmd(t, repo, "update-ref", "-d", "refs/remotes/origin/main")
+				return repo
+			},
+			want: "could not determine default branch",
+		},
+		{
+			name: "detached HEAD",
+			setup: func(t *testing.T, f *fixture) string {
+				repo := f.repo("x")
+				gitCmd(t, repo, "checkout", "-q", "--detach")
+				return repo
+			},
+			want: "not on a branch (detached HEAD)",
+		},
+		{
+			name: "branch already exists locally",
+			setup: func(t *testing.T, f *fixture) string {
+				repo := f.repo("x")
+				gitCmd(t, repo, "branch", "b")
+				return repo
+			},
+			want: "branch 'b' already exists locally",
+		},
+		{
+			name: "branch already exists on origin",
+			setup: func(t *testing.T, f *fixture) string {
+				repo := f.repo("x")
+				gitCmd(t, repo, "push", "-q", "origin", "HEAD:refs/heads/b")
+				gitCmd(t, repo, "fetch", "-q", "origin")
+				return repo
+			},
+			want: "branch 'b' already exists on origin",
+		},
+	}
+
+	for _, tt := range stops {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := newFixture(t)
+			repo := tt.setup(t, f)
+
+			p, res := preflight(repo, "b", newCapture("x", false, io.Discard))
+			if res == nil {
+				t.Fatalf("preflight carried on, want %q", tt.want)
+			}
+			skipped, ok := res.(outcomeSkipped)
+			if !ok {
+				t.Fatalf("outcome = %T, want a skip -- none of these is a failure", res)
+			}
+			if got := skipped.reason; got != tt.want {
+				t.Errorf("reason = %q, want %q", got, tt.want)
+			}
+			// Nothing downstream may read the data return once the outcome is
+			// set, so it must not be half-filled.
+			if (p != prep{}) {
+				t.Errorf("prep = %#v, want the zero value alongside an outcome", p)
+			}
+		})
+	}
+}
+
+// cleanup used to be a deferred closure that could only be reached by making a
+// repo end each way for real. The rule it encodes is small enough to state as a
+// table: restore unless the repo failed or -k was passed.
+func TestCleanup(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		keepBranch  bool
+		res         outcome
+		wantRestore bool
+	}{
+		{
+			name:        "success",
+			res:         success("https://github.com/fake/x/pull/7"),
+			wantRestore: true,
+		},
+		{
+			// Nothing worth keeping, so the branch goes with it.
+			name:        "a skip",
+			res:         skip("command made no changes"),
+			wantRestore: true,
+		},
+		{
+			// The branch, its commits and any uncommitted edits are the only
+			// record of what broke.
+			name:        "a failure",
+			res:         fail("command exited 1", nil),
+			wantRestore: false,
+		},
+		{
+			name:        "-k",
+			keepBranch:  true,
+			res:         success("https://github.com/fake/x/pull/7"),
+			wantRestore: false,
+		},
+		{
+			// -k and a failure agree, and neither needs to know about the
+			// other: both mean leave the repo alone.
+			name:        "-k and a failure",
+			keepBranch:  true,
+			res:         fail("command exited 1", nil),
+			wantRestore: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := newFixture(t)
+			repo := f.repo("x")
+			gitCmd(t, repo, "checkout", "-q", "-b", "feature")
+			gitCmd(t, repo, "checkout", "-q", "-b", "b")
+
+			a := &app{cfg: &config{branch: "b", keepBranch: tt.keepBranch}}
+			a.cleanup(tt.res, repo, "feature", newCapture("x", false, io.Discard))
+
+			wantBranch := "b"
+			if tt.wantRestore {
+				wantBranch = "feature"
+			}
+			if got := currentBranch(t, repo); got != wantBranch {
+				t.Errorf("left on branch %q, want %q", got, wantBranch)
+			}
+			if got := localHasBranch(t, repo, "b"); got == tt.wantRestore {
+				t.Errorf("branch 'b' exists = %v, want %v", got, !tt.wantRestore)
+			}
+		})
+	}
+}
+
+// The command sees the repo as its working directory, its path via {} and
+// $REPO, and its name via $REPO_NAME.
+//
+// Each row used to be a whole run -- discover, cut a branch, commit, push, open
+// a PR -- with the value read back out of a commit on the fake remote, all to
+// find out what one environment variable held. runCommand is that step on its
+// own, so the file can be read where the command wrote it.
+func TestRunCommandContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command func(t *testing.T) []string
+		want    func(repo string) string
+	}{
+		{
+			name:    "{} becomes the repo path",
+			command: func(t *testing.T) []string { return helperCmd(t, "args", "out.txt", "{}") },
+			want:    func(repo string) string { return resolvePath(repo) + "\n" },
+		},
+		{
+			name:    "REPO is the absolute path",
+			command: func(t *testing.T) []string { return helperCmd(t, "env", "out.txt", "REPO") },
+			want:    func(repo string) string { return resolvePath(repo) + "\n" },
+		},
+		{
+			name:    "REPO_NAME is the basename",
+			command: func(t *testing.T) []string { return helperCmd(t, "env", "out.txt", "REPO_NAME") },
+			want:    func(repo string) string { return filepath.Base(repo) + "\n" },
+		},
+		{
+			name:    "the working directory is the repo root",
+			command: func(t *testing.T) []string { return helperCmd(t, "pwd", "out.txt") },
+			want:    func(repo string) string { return resolvePath(repo) + "\n" },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := newFixture(t)
+			repo := f.repo("x")
+			a := &app{cfg: &config{command: tt.command(t)}}
+
+			if err := a.runCommand(repo, newCapture("x", false, io.Discard)); err != nil {
+				t.Fatalf("runCommand: %v", err)
+			}
+
+			if got, want := readFile(t, filepath.Join(repo, "out.txt")), tt.want(repo); got != want {
+				t.Errorf("out.txt = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// runCommand is the one step mkprs does not control the behaviour of, so what
+// is worth pinning is the boundary around it: where it runs, what it can see,
+// and what comes back when it goes wrong. The context is the table above; these
+// are the failure shapes, which never write a file at all.
+func TestRunCommand(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a command that succeeds", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		c := newCapture("x", false, io.Discard)
+		a := &app{cfg: &config{command: helperCmd(t, "writeprint", "out.txt", "hello")}}
+
+		if err := a.runCommand(repo, c); err != nil {
+			t.Fatalf("runCommand: %v", err)
+		}
+		// Both streams reach the capture, which is what a failure replays.
+		if got, want := c.String(), "hello\n"; got != want {
+			t.Errorf("capture = %q, want %q", got, want)
+		}
+		// And the working directory was the repo, not the test's.
+		if _, err := os.Stat(filepath.Join(repo, "out.txt")); err != nil {
+			t.Errorf("command did not run in the repo: %v", err)
+		}
+	})
+
+	t.Run("a command that exits non-zero", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		c := newCapture("x", false, io.Discard)
+		a := &app{cfg: &config{command: helperCmd(t, "fail", "3", "went wrong")}}
+
+		err := a.runCommand(f.repo("x"), c)
+		if err == nil {
+			t.Fatal("runCommand succeeded, want an error")
+		}
+		if got, want := err.Error(), "command exited 3"; got != want {
+			t.Errorf("error = %q, want %q", got, want)
+		}
+		// The command's own explanation stays in the capture rather than being
+		// folded into the error, so it is replayed under the failure line.
+		if got, want := c.String(), "went wrong\n"; got != want {
+			t.Errorf("capture = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("a command that cannot start", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		a := &app{cfg: &config{command: []string{"mkprs-no-such-binary"}}}
+
+		err := a.runCommand(f.repo("x"), newCapture("x", false, io.Discard))
+		if err == nil {
+			t.Fatal("runCommand succeeded, want an error")
+		}
+		// 127 is what a shell reports for "not found", and there is no exit
+		// status to read: the process never ran.
+		if got, want := err.Error(), "command exited 127"; got != want {
+			t.Errorf("error = %q, want %q", got, want)
+		}
+	})
+}
+
+// commitAndPush is everything between the command finishing and the PR: check
+// the command stayed put, stage, commit, decide there is something to open a PR
+// for, push. It is the half of processRepo that mutates, and the only one that
+// can end a repo either way -- "no changes" is a skip, everything else a
+// failure -- which is why it returns an outcome rather than an error.
+func TestCommitAndPush(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// setup runs with the working branch already checked out, standing in
+		// for whatever the user's command did.
+		setup func(t *testing.T, repo string)
+		// want is the reason, and wantKind the variant it arrives as. An empty
+		// reason means the repo carries on to the PR.
+		want     string
+		wantKind outcome
+	}{
+		{
+			name: "the command edited the tree",
+			setup: func(t *testing.T, repo string) {
+				writeFile(t, filepath.Join(repo, "file.txt"), "changed\n")
+			},
+		},
+		{
+			// Nothing staged is not the same as nothing done, so this has to
+			// reach the PR as well.
+			name: "the command committed its own work",
+			setup: func(t *testing.T, repo string) {
+				writeFile(t, filepath.Join(repo, "file.txt"), "changed\n")
+				gitCmd(t, repo, "add", "-A")
+				gitCmd(t, repo, "commit", "-q", "-m", "committed by the command")
+			},
+		},
+		{
+			name:     "the command changed nothing",
+			setup:    func(t *testing.T, repo string) {},
+			want:     "command made no changes",
+			wantKind: outcomeSkipped{},
+		},
+		{
+			// Staging and committing act on whatever HEAD points at, so this
+			// would otherwise commit to a branch mkprs does not own.
+			name: "the command switched branch",
+			setup: func(t *testing.T, repo string) {
+				gitCmd(t, repo, "checkout", "-q", "-b", "elsewhere")
+			},
+			want:     "command left the repo on 'elsewhere', not 'b'",
+			wantKind: outcomeFailed{},
+		},
+		{
+			name: "the command detached HEAD",
+			setup: func(t *testing.T, repo string) {
+				gitCmd(t, repo, "checkout", "-q", "--detach")
+			},
+			want:     "command left the repo with a detached HEAD",
+			wantKind: outcomeFailed{},
+		},
+		{
+			name: "the branch cannot be pushed",
+			setup: func(t *testing.T, repo string) {
+				writeFile(t, filepath.Join(repo, "file.txt"), "changed\n")
+				gitCmd(t, repo, "remote", "set-url", "origin", "git@github.com:fake/gone.git")
+			},
+			want:     "unable to push to origin/b",
+			wantKind: outcomeFailed{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := newFixture(t)
+			repo := f.repo("x")
+			gitCmd(t, repo, "checkout", "-q", "-b", "b", "origin/main")
+			tt.setup(t, repo)
+
+			a := &app{cfg: &config{branch: "b", message: "commit msg"}}
+			p := prep{defaultBranch: "main", base: "origin/main", startBranch: "main"}
+			got := a.commitAndPush(repo, p, newCapture("x", false, io.Discard))
+
+			if tt.want == "" {
+				if got != nil {
+					t.Fatalf("commitAndPush = %#v, want it to carry on", got)
+				}
+				// Carrying on means the branch is on origin for the PR to
+				// point at, and carries the command's work.
+				if !f.remoteHasBranch("x", "b") {
+					t.Error("branch was not pushed")
+				}
+				if got, want := f.remoteFile("x", "b", "file.txt"), "changed"; got != want {
+					t.Errorf("pushed file.txt = %q, want %q", got, want)
+				}
+				return
+			}
+
+			if got == nil {
+				t.Fatalf("commitAndPush carried on, want %q", tt.want)
+			}
+			if reflect.TypeOf(got) != reflect.TypeOf(tt.wantKind) {
+				t.Errorf("outcome = %T, want %T", got, tt.wantKind)
+			}
+			var reason string
+			switch o := got.(type) {
+			case outcomeSkipped:
+				reason = o.reason
+			case outcomeFailed:
+				reason = o.reason
+			}
+			if reason != tt.want {
+				t.Errorf("reason = %q, want %q", reason, tt.want)
+			}
+			// A repo that ends here never reaches origin.
+			if f.remoteHasBranch("x", "b") {
+				t.Error("branch was pushed despite the repo ending early")
+			}
+		})
 	}
 }
