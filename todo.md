@@ -128,11 +128,46 @@ know it would. Opt-out, not opt-in.
   case here, so the guard stays invisible until something is genuinely wrong —
   which is the only way a default like this survives contact with daily use. One
   flag away when the large run is intentional, never silent when it is not.
-  Nested-repo discovery (see below) is the concrete way this bites: a tree can
-  contain far more repos than it appears to.
-
   Count after `dedupeRepos`, which `run` already applies, so a repo reached from
   two targets does not spend two of the budget.
+
+- **Stop discovery at the first repo found.** Today pruning stops descent into
+  the `.git` directory itself, not into the rest of the tree, so a repo nested
+  inside another repo is discovered and both are processed. Verified against
+  `~/Code`, where `CSharp/TestProjects` is a repo containing 10 nested repos and
+  all 11 are returned — a tree can contain far more repos than it appears to.
+
+  Git itself discourages the arrangement: the inner repo has to be `.gitignore`d
+  by hand, and submodules exist for the case. So a nested repo found by accident
+  is more likely a stray checkout than something anyone wants a pull request
+  against. Prune the whole repo subtree instead: when a directory holds a `.git`
+  directory, record it and `fs.SkipDir` the directory rather than the `.git`.
+
+  Naming one directly still works, and is not an error — `mkprs outer
+  outer/vendor/inner` processes both. That already falls out of the current
+  structure: an inner repo passed as a target is found by the walk as its own
+  root, so the "target is inside repository" check never runs for it. Worth a
+  test pinning it, since it is the half of the behaviour that is easy to lose
+  while implementing the other half.
+
+  The `.git`-file check stays as-is, or submodules and linked worktrees start
+  being walked into — see the design note on why both are excluded.
+
+  Independently of nesting, this is the discovery speedup: today every repo's
+  full working tree is walked looking for more `.git` directories, which means
+  `node_modules`, `bin/obj`, `.venv`, all of it. Pruning at the root reads one
+  directory per repo instead. On a tree like `~/Code` that is likely the larger
+  cost, and it is paid on every run.
+
+  Detection has to be a stat of `<dir>/.git` on entering each directory, not a
+  check of the `.git` entry itself: `fs.SkipDir` returned from a directory skips
+  *that* directory's contents, so returning it from `.git` cannot prune the
+  parent. Use `os.Lstat` rather than `os.Stat` — `d.IsDir()` on a `DirEntry` does
+  not follow symlinks, so a symlinked `.git` is excluded today and `os.Stat`
+  would quietly start including it.
+
+  Reduces the pressure behind `--max-repos` above but does not remove it: forty
+  sibling repos under one target is still forty pull requests.
 
 - **Fail-fast option.** The main loop always continues after a failure. When the
   first repo fails because the command itself is wrong, you want to stop and fix
@@ -320,6 +355,18 @@ tests, not from having two production implementations.
 
 ## Design notes (decided, not TODO)
 
+- **Submodules and linked worktrees are both excluded from discovery.** Only
+  `.git` *directories* count; a submodule's `.git` and a `git worktree` checkout's
+  `.git` are each a file holding a `gitdir:` pointer, so one rule covers both.
+  `discoverRepos` (`internal/mkprs/discover.go`) keys off `d.IsDir()` for exactly
+  this reason.
+
+  Excluding worktrees is deliberate, not a side effect. A worktree is a second
+  checkout of a repo mkprs would reach anyway, and this tool makes one specific
+  change against one repo's default branch — making it twice is not meaningful.
+  Worse, `dedupeRepos` keys on path, so a worktree of an already-discovered repo
+  would not dedupe: two entries, two branches, two pull requests against the same
+  GitHub repo.
 - **No `-c "shell string"` mode.** The command is argv after `--`, executed
   directly — no `eval`, no re-parsing. When a pipe or glob is needed, write
   `-- bash -c '...'` explicitly so the eval boundary is visible at the call site.
@@ -509,15 +556,3 @@ tests, not from having two production implementations.
   branch name, then fails with "no command specified" because the terminator was
   consumed. pflag has no required-value guard for this; an explicit check that no
   flag value starts with `--` would give a better message.
-- **Nested repo discovery**: nested repositories *are* discovered. Pruning stops
-  descent into the `.git` directory itself, not into the rest of the tree, so a
-  repo inside another repo is visited and both are processed. Verified against
-  `~/Code`, where `CSharp/TestProjects` is a repo containing 10 nested repos and
-  all 11 are returned. In practice the outer repo then skips as "working tree not
-  clean", since the nested checkouts are untracked content — but it is still
-  discovered, and a run against a large tree can process far more repos than
-  expected. This is the concrete argument for `--max-repos` defaulting to on.
-
-  Submodules *are* excluded, because only `.git` *directories* count: a
-  submodule's `.git` is a file holding a `gitdir:` pointer. `discoverRepos`
-  (`internal/mkprs/discover.go`) keys off `d.IsDir()` for exactly this reason.
