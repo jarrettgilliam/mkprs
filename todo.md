@@ -430,6 +430,115 @@ itself.
   above, which renames it for a different reason (it stops being the default
   branch at all). Do that one first and this row disappears.
 
+- **The git helpers do not cover every shape they are asked for.** `git.go` has
+  three, distinguished only by what they do with the two streams — which is both
+  the point and the reason the names carry so little:
+
+  | helper | stdout | stderr | returns |
+  |---|---|---|---|
+  | `git` | captured, trimmed | discarded | `(string, error)` |
+  | `gitOK` | discarded | discarded | `bool` |
+  | `gitTo` | to `w` | to `w` | `error` |
+
+  A fourth shape — stdout discarded, stderr to `w` — has no helper, so
+  `restoreRepo` (`git.go:135`) drops to `exec.Command` and wires it up inline.
+  That is the only direct invocation left outside the helpers, and it is not an
+  oversight: `git branch -D` prints "Deleted branch …" on stdout, which is noise,
+  while its errors belong in the capture. The shape is legitimate, the
+  hand-rolling is not.
+
+  The smallest fix that pays: extract the two lines every one of them starts with
+  into `gitCmd(repoPath string, args ...string) *exec.Cmd`, and let all four
+  callers configure the streams they want. One place knows that git runs with
+  `Dir` set to the repo, and an oddball shape stops meaning "bypass the helpers".
+  Whether the fourth shape then deserves its own named wrapper is a judgement
+  call best made once the builder exists.
+
+  Two things worth deciding at the same time:
+
+  - **`git` throws stderr away**, so a failure reaches the caller as a bare
+    `exit status 1` and every call site invents its own prose (`could not create
+    branch`, `could not stage changes`). That is deliberate — those messages are
+    better than git's for the outcome line — but it means the actual git error is
+    unrecoverable for the ones that route through `git` rather than `gitTo`.
+    Capturing stderr into the returned error would cost nothing and give the
+    capture something to say when a repo fails inside a helper.
+  - **Every helper takes `repoPath` first**, which is a method receiver wearing a
+    disguise. A `repo` type with `r.git(…)` would delete that parameter from
+    thirteen signatures. Attractive, and much larger than the rest of this item —
+    worth it only if the file grows again.
+
+- **`processRepo` is 127 lines** (`run.go:34`). It is the only function in the
+  package over 100; `parseArgs` (52, `cli.go:84`) and `app.run` (41,
+  `mkprs.go:55`) are the next two and both are fine. So this is one function, not
+  a sweep.
+
+  What makes it long is that it is a pipeline of a dozen steps, each of which can
+  end the repo, and the early returns are the control flow. Extraction fights
+  that: a helper that can stop the pipeline has to return an `outcome`, and
+  `nil`-means-carry-on reintroduces exactly the meaningful nil the *Typed skip
+  reasons* section above is glad to be rid of — `run()` already has to defend
+  against `processRepo` returning nil.
+
+  So split only where a piece has one exit:
+
+  - **`expandCommand(command []string, repoPath string) []string`** — the `{}`
+    substitution loop. Pure, no outcome, and currently only reachable through a
+    full end-to-end run; as a function it is a table test.
+  - **The pre-flight filters** (remote, clean tree, fetch, default branch, head,
+    branch free) are a contiguous block that ends either "skip" or "here is the
+    base to cut from". One `outcome` return, one data return — the nil question
+    confined to a single call site instead of spread across six.
+  - **The deferred cleanup closure** is ~20 lines of comment and predicate now
+    that failures opt out. As `func (a *app) cleanup(res outcome, …)` it can be
+    tested directly rather than through a repo that fails on purpose.
+
+  That leaves the commit → push → open spine linear, which is the part worth
+  reading top to bottom.
+
+  **Sequencing**: do this before `-i` and `--timeout`, not after. Both edit the
+  middle of this function — the prompt lands between the command and the staging,
+  the timeout wraps the command — and both are easier to review against a spine
+  than against a 127-line body. The *Spell out names* table above also renames
+  this function's `c` parameter; whichever lands second inherits a smaller diff.
+
+- **`cli_test.go` tests one form per flag, not both.** `TestParseArgsFlagForms`
+  exercises every short flag (`-b -m -t -B -r -d -k -v`) but only two long ones,
+  `--branch=` and `--draft`. `--message`, `--title`, `--body`, `--reviewer`,
+  `--keep-branch` and `--verbose` are never parsed by their long names in any
+  test.
+
+  What that would actually catch is narrow — a typo in the long name passed to
+  `StringVarP`, or a short/long pair wired to different fields — since pflag does
+  the parsing and needs no help being trusted.
+
+  **Write it as one row per flag, not one row per form.** Each row carries the
+  pair and how to read the value back, and the test generates the forms from it:
+  `-b x`, `-b=x`, `--branch x`, `--branch=x` for a string; `-d`, `--draft`,
+  `--draft=true` for a bool. Forgetting to cover both spellings of a flag stops
+  being possible, and adding a flag costs one row instead of four, which is what
+  keeps the table from turning into ceremony as the flags keep coming.
+
+  ```go
+  tests := []struct {
+      long, short string
+      value       string // "" for a bool
+      get         func(*config) any
+  }{
+      {"branch", "b", "my-branch", func(c *config) any { return c.branch }},
+      {"draft", "d", "", func(c *config) any { return c.draft }},
+      ...
+  }
+  ```
+
+  **Then close the last gap with `fs.VisitAll`.** A row per flag still has to be
+  written, so a newly added flag can still arrive untested. Walking the flag set
+  that `parseArgs` returns and failing on any flag with no row makes that
+  impossible too — the suite breaks the moment a flag is registered without one.
+  `--help` needs an explicit exemption (it returns `pflag.ErrHelp` and a nil
+  config, so it cannot be driven through the same path), and that exemption list
+  is the thing to keep honest: it is where a check like this quietly rots.
+
 - **Trailing-flag robustness**: `mkprs tgt -b -- true` silently takes `--` as the
   branch name, then fails with "no command specified" because the terminator was
   consumed. pflag has no required-value guard for this; an explicit check that no
