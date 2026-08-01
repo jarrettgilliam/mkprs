@@ -249,31 +249,6 @@ know it would. Opt-out, not opt-in.
   build artifacts in a repo with a thin `.gitignore` will commit them.
   `--tracked-only` stages with `git add -u` instead.
 
-## Typed skip reasons
-
-`outcome` is a sealed sum type built by constructors that require their data, so
-a skip without a reason will not compile. The reason itself is still a free-form
-string.
-
-- Replace `skip(reason string)` with a closed set, so the six skip sites name a
-  constant rather than writing prose that could drift.
-- Two reasons carry runtime detail — `branchLocation`'s "locally"/"on origin"
-  and the offending remote URL — so a detail field has to survive alongside the
-  constant. That is the wrinkle that makes this more than a mechanical swap.
-- Nothing renders a status word any more — `outcome.String()` went with `--log`,
-  and each variant now renders itself through `report` — so a closed set is now
-  purely about keeping the reasons themselves from drifting.
-- Would not close the one residual gap, which is inherent to Go: in-package code
-  can still write `outcomeSkipped{}` with an empty reason. Dispatch closed the
-  gap that mattered — an unhandled variant is now a compile error, where the old
-  `default:` arm caught it at runtime.
-- The only way left to hand `run()` a broken outcome is an explicit `return nil`
-  from `processRepo`, which compiles because `nil` is a valid value of any
-  interface type. `run()` substitutes a failure for it, so that mistake prints an
-  internal error rather than panicking mid-run. Value receivers rule out the
-  subtler version of this — a non-nil interface holding a nil pointer, where
-  `res != nil` is true but the call still dereferences nil.
-
 ## Replace `gh` with direct GitHub API calls
 
 `gh` is the last external binary mkprs needs, which undercuts the reason it was
@@ -283,8 +258,8 @@ GitHub CLI gets `'gh' (GitHub CLI) is not installed` and no PRs.
 Opening a pull request is one `POST`, so this costs a `net/http` call and an auth
 story — no new dependencies. **The seam already exists.** `ghCLI` implements
 `prOpener` (`internal/mkprs/pr.go`); a `restAPI` implementing the same interface
-drops in without touching `openPR`. `TestGhArgs` covers the translation for
-the CLI path and end-to-end tests inject `fakePR`, so neither needs rewriting.
+drops in without touching `openPR`, and the end-to-end tests inject `fakePR`, so
+they need no rewriting either. `ghCLI` then goes — see *Migration* below.
 
 ### Authentication
 
@@ -343,10 +318,25 @@ reads the *un-rewritten* config value, which is what makes this parseable.
 
 ### Migration
 
-Keep both implementations and choose at startup: token found → `restAPI`; else
-`gh` on `PATH` → `ghCLI`; else fail. Existing users notice nothing, users without
-`gh` start working, and `ghCLI` can be deleted later once the API path has proven
-itself.
+**Replace `ghCLI` outright** — `restAPI` is the only implementation. Delete
+`ghArgs` and `TestGhArgs` with it. Nothing needs proving out in parallel; if it
+did, that is what a pre-release is for, not a second code path.
+
+Keeping both would serve nobody: token source 2 is `gh auth token`, so every user
+with a working `gh` already hands `restAPI` a valid token. The only users left
+over are ones where `gh pr create` works but `gh auth token` will not print — and
+paying for that with two code paths costs real things. The two would disagree on
+behaviour (`422` is a skip and a failed reviewer is a warning on the REST path;
+`ghCLI` collapses both into `failed to create PR`), so what a user sees would
+depend on their environment. The redaction rule above would need getting right
+twice, once for argv and once for method + URL. And a fallback that only fires in
+configurations that are hard to reproduce stays untested until the day it fails.
+
+`gh` becomes an optional convenience — a place to find a token — rather than a
+requirement, which is the point of this whole item.
+
+**The seam stays.** `prOpener` earns its place from `fakePR` in the end-to-end
+tests, not from having two production implementations.
 
 ## Design notes (decided, not TODO)
 
@@ -521,9 +511,9 @@ itself.
   What makes it long is that it is a pipeline of a dozen steps, each of which can
   end the repo, and the early returns are the control flow. Extraction fights
   that: a helper that can stop the pipeline has to return an `outcome`, and
-  `nil`-means-carry-on reintroduces exactly the meaningful nil the *Typed skip
-  reasons* section above is glad to be rid of — `run()` already has to defend
-  against `processRepo` returning nil.
+  `nil`-means-carry-on reintroduces a meaningful nil that `outcome`'s
+  constructors otherwise rule out — `run()` already has to defend against
+  `processRepo` returning nil.
 
   So split only where a piece has one exit:
 
