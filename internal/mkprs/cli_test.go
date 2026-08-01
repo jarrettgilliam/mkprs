@@ -50,8 +50,111 @@ func TestParseArgsUsageErrors(t *testing.T) {
 }
 
 // The four flag-spelling tests in the shell suite each built a repo and ran a
-// whole PR flow to prove a string was parsed. Here they are one table.
+// whole PR flow to prove a string was parsed. Here they are one table -- and one
+// row per flag rather than per spelling, so covering both forms of a flag is not
+// something anyone has to remember to do.
+//
+// pflag does the parsing and needs no help being trusted. What this catches is
+// the wiring: a typo in a long name, or a short and long pair pointed at
+// different fields.
+var flagRows = []struct {
+	long, short string
+	value       string // empty for a bool
+	get         func(*config) any
+}{
+	{"branch", "b", "my-branch", func(c *config) any { return c.branch }},
+	{"message", "m", "commit msg", func(c *config) any { return c.message }},
+	{"title", "t", "pr title", func(c *config) any { return c.title }},
+	{"body", "B", "pr body", func(c *config) any { return c.body }},
+	{"reviewer", "r", "alice,bob", func(c *config) any { return c.reviewers }},
+	{"draft", "d", "", func(c *config) any { return c.draft }},
+	{"keep-branch", "k", "", func(c *config) any { return c.keepBranch }},
+	{"verbose", "v", "", func(c *config) any { return c.verbose }},
+}
+
+// flagForms returns every spelling pflag accepts for a flag, as argv fragments.
+// A bool has no space form: `-d true` would read true as a positional argument.
+func flagForms(long, short, value string) [][]string {
+	if value == "" {
+		return [][]string{{"-" + short}, {"--" + long}, {"--" + long + "=true"}}
+	}
+	return [][]string{
+		{"-" + short, value},
+		{"-" + short + "=" + value},
+		{"--" + long, value},
+		{"--" + long + "=" + value},
+	}
+}
+
 func TestParseArgsFlagForms(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range flagRows {
+		t.Run(tt.long, func(t *testing.T) {
+			t.Parallel()
+
+			var want any = true
+			if tt.value != "" {
+				want = tt.value
+			}
+
+			for _, form := range flagForms(tt.long, tt.short, tt.value) {
+				t.Run(strings.Join(form, " "), func(t *testing.T) {
+					t.Parallel()
+
+					args := []string{"/tmp"}
+					// -b is required, and supplying it twice for its own row
+					// would just test that the last value wins.
+					if tt.long != "branch" {
+						args = append(args, "-b", "required")
+					}
+					args = append(args, form...)
+					args = append(args, "--", "true")
+
+					cfg, _, err := parseArgs(args)
+					if err != nil {
+						t.Fatalf("parseArgs: %v", err)
+					}
+					if got := tt.get(cfg); got != want {
+						t.Errorf("%s = %v, want %v", tt.long, got, want)
+					}
+				})
+			}
+		})
+	}
+}
+
+// A row per flag still has to be written, so a new flag can arrive untested.
+// Walking the flag set parseArgs built closes that: registering a flag without a
+// row breaks the suite immediately.
+//
+// The exemption list is where a check like this rots, so it stays at one entry
+// with a reason: --help returns pflag.ErrHelp and a nil config, so it cannot be
+// driven through the table at all.
+func TestParseArgsFlagFormsCoversEveryFlag(t *testing.T) {
+	t.Parallel()
+
+	exempt := map[string]bool{"help": true}
+
+	covered := map[string]bool{}
+	for _, tt := range flagRows {
+		covered[tt.long] = true
+	}
+
+	_, fs, err := parseArgs([]string{"/tmp", "-b", "x", "--", "true"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+
+	fs.VisitAll(func(f *pflag.Flag) {
+		if !covered[f.Name] && !exempt[f.Name] {
+			t.Errorf("--%s has no row in flagRows; add one so both its forms are tested", f.Name)
+		}
+	})
+}
+
+// Flags may appear before or after the target dirs, and in any order.
+func TestParseArgsFlagPlacement(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -60,54 +163,19 @@ func TestParseArgsFlagForms(t *testing.T) {
 		want config
 	}{
 		{
-			name: "short space form",
-			args: []string{"/tmp", "-b", "my-branch", "--", "true"},
-			want: config{branch: "my-branch"},
-		},
-		{
-			name: "short equals form",
-			args: []string{"/tmp", "-b=my-branch", "--", "true"},
-			want: config{branch: "my-branch"},
-		},
-		{
-			name: "long equals form",
-			args: []string{"/tmp", "--branch=my-branch", "--", "true"},
-			want: config{branch: "my-branch"},
-		},
-		{
-			name: "verbose short form",
-			args: []string{"/tmp", "-b", "x", "-v", "--", "true"},
-			want: config{branch: "x", verbose: true},
-		},
-		{
 			name: "flags after the target dir",
 			args: []string{"/tmp", "-b", "x", "-m", "msg", "-t", "title", "-B", "body", "-r", "alice", "--", "true"},
 			want: config{branch: "x", message: "msg", title: "title", body: "body", reviewers: "alice"},
 		},
 		{
-			name: "keep-branch short form",
-			args: []string{"/tmp", "-b", "x", "-k", "--", "true"},
-			want: config{branch: "x", keepBranch: true},
-		},
-		{
-			name: "several reviewers",
-			args: []string{"/tmp", "-b", "x", "-r", "alice,bob", "--", "true"},
-			want: config{branch: "x", reviewers: "alice,bob"},
-		},
-		{
-			name: "draft short form",
-			args: []string{"/tmp", "-b", "x", "-d", "--", "true"},
-			want: config{branch: "x", draft: true},
-		},
-		{
-			name: "draft long form",
-			args: []string{"/tmp", "-b", "x", "--draft", "--", "true"},
-			want: config{branch: "x", draft: true},
-		},
-		{
 			name: "flags before the target dir",
 			args: []string{"-b", "x", "-v", "/tmp", "--", "true"},
 			want: config{branch: "x", verbose: true},
+		},
+		{
+			name: "flags on both sides of the target dir",
+			args: []string{"-b", "x", "/tmp", "-d", "--", "true"},
+			want: config{branch: "x", draft: true},
 		},
 	}
 
@@ -119,30 +187,12 @@ func TestParseArgsFlagForms(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseArgs: %v", err)
 			}
-
-			if cfg.branch != tt.want.branch {
-				t.Errorf("branch = %q, want %q", cfg.branch, tt.want.branch)
-			}
-			if cfg.message != tt.want.message {
-				t.Errorf("message = %q, want %q", cfg.message, tt.want.message)
-			}
-			if cfg.title != tt.want.title {
-				t.Errorf("title = %q, want %q", cfg.title, tt.want.title)
-			}
-			if cfg.body != tt.want.body {
-				t.Errorf("body = %q, want %q", cfg.body, tt.want.body)
-			}
-			if cfg.reviewers != tt.want.reviewers {
-				t.Errorf("reviewers = %q, want %q", cfg.reviewers, tt.want.reviewers)
-			}
-			if cfg.draft != tt.want.draft {
-				t.Errorf("draft = %v, want %v", cfg.draft, tt.want.draft)
-			}
-			if cfg.keepBranch != tt.want.keepBranch {
-				t.Errorf("keepBranch = %v, want %v", cfg.keepBranch, tt.want.keepBranch)
-			}
-			if cfg.verbose != tt.want.verbose {
-				t.Errorf("verbose = %v, want %v", cfg.verbose, tt.want.verbose)
+			// The flags themselves are covered above; what matters here is
+			// only that placement did not change which field got the value.
+			for _, f := range flagRows {
+				if got, want := f.get(cfg), f.get(&tt.want); got != want {
+					t.Errorf("%s = %v, want %v", f.long, got, want)
+				}
 			}
 		})
 	}

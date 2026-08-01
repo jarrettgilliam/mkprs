@@ -537,43 +537,6 @@ tests, not from having two production implementations.
   than against a 127-line body. The *Spell out names* table above also renames
   this function's `c` parameter; whichever lands second inherits a smaller diff.
 
-- **`cli_test.go` tests one form per flag, not both.** `TestParseArgsFlagForms`
-  exercises every short flag (`-b -m -t -B -r -d -k -v`) but only two long ones,
-  `--branch=` and `--draft`. `--message`, `--title`, `--body`, `--reviewer`,
-  `--keep-branch` and `--verbose` are never parsed by their long names in any
-  test.
-
-  What that would actually catch is narrow — a typo in the long name passed to
-  `StringVarP`, or a short/long pair wired to different fields — since pflag does
-  the parsing and needs no help being trusted.
-
-  **Write it as one row per flag, not one row per form.** Each row carries the
-  pair and how to read the value back, and the test generates the forms from it:
-  `-b x`, `-b=x`, `--branch x`, `--branch=x` for a string; `-d`, `--draft`,
-  `--draft=true` for a bool. Forgetting to cover both spellings of a flag stops
-  being possible, and adding a flag costs one row instead of four, which is what
-  keeps the table from turning into ceremony as the flags keep coming.
-
-  ```go
-  tests := []struct {
-      long, short string
-      value       string // "" for a bool
-      get         func(*config) any
-  }{
-      {"branch", "b", "my-branch", func(c *config) any { return c.branch }},
-      {"draft", "d", "", func(c *config) any { return c.draft }},
-      ...
-  }
-  ```
-
-  **Then close the last gap with `fs.VisitAll`.** A row per flag still has to be
-  written, so a newly added flag can still arrive untested. Walking the flag set
-  that `parseArgs` returns and failing on any flag with no row makes that
-  impossible too — the suite breaks the moment a flag is registered without one.
-  `--help` needs an explicit exemption (it returns `pflag.ErrHelp` and a nil
-  config, so it cannot be driven through the same path), and that exemption list
-  is the thing to keep honest: it is where a check like this quietly rots.
-
 - **Trailing-flag robustness**: `mkprs tgt -b -- true` silently takes `--` as the
   branch name, then fails with "no command specified" because the terminator was
   consumed. pflag has no required-value guard for this; an explicit check that no
