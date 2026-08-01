@@ -7,6 +7,79 @@ import (
 	"testing"
 )
 
+// The helpers are told apart by what they do with the two streams, so that is
+// what is worth asserting: one command, four shapes.
+func TestGitHelperStreams(t *testing.T) {
+	t.Parallel()
+
+	// A ref that does not exist: stdout empty, stderr a complaint, exit non-zero.
+	bad := []string{"rev-parse", "--verify", "refs/heads/nope"}
+
+	t.Run("git returns stdout and hides stderr", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		out, err := git(f.repo("x"), "rev-parse", "--abbrev-ref", "HEAD")
+		if err != nil || out != "main" {
+			t.Errorf("git = %q, %v; want main, nil", out, err)
+		}
+	})
+
+	// gitTo is the streaming shape: both halves reach the capture.
+	t.Run("gitTo writes both streams", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		var out bytes.Buffer
+		if err := gitTo(f.repo("x"), &out, bad...); err == nil {
+			t.Fatal("gitTo err = nil, want a failure")
+		}
+		if !strings.Contains(out.String(), "fatal:") {
+			t.Errorf("output = %q, want git's complaint", out.String())
+		}
+	})
+
+	// gitErrTo exists for `git branch -D`, whose stdout is noise.
+	t.Run("gitErrTo writes stderr only", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		gitCmd(t, repo, "branch", "work")
+
+		var out bytes.Buffer
+		if err := gitErrTo(repo, &out, "branch", "-D", "work"); err != nil {
+			t.Fatalf("gitErrTo err = %v, want nil", err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("output = %q, want stdout discarded", out.String())
+		}
+
+		// Same command again, now that the branch is gone.
+		if err := gitErrTo(repo, &out, "branch", "-D", "work"); err == nil {
+			t.Fatal("gitErrTo err = nil, want a failure")
+		}
+		if !strings.Contains(out.String(), "not found") {
+			t.Errorf("output = %q, want git's complaint", out.String())
+		}
+	})
+}
+
+// git's error has to carry git's own words: "exit status 128" alone tells a
+// reader nothing, and stderr never reaches the capture on this path.
+func TestGitErrorCarriesStderr(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	_, err := git(f.repo("x"), "rev-parse", "--verify", "refs/heads/nope")
+	if err == nil {
+		t.Fatal("git err = nil, want a failure")
+	}
+	if !strings.Contains(err.Error(), "fatal:") {
+		t.Errorf("err = %q, want git's stderr included", err)
+	}
+}
+
 func TestIsGitHubRepo(t *testing.T) {
 	t.Parallel()
 

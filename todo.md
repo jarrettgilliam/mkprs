@@ -412,7 +412,7 @@ itself.
   |---|---|---|
   | `outcome.go` field | `outcomeFailed.c` | `output` |
   | `mkprs.go` field | `app.errw` | `errOut` |
-  | `git.go` params | `gitTo(…, w io.Writer)`, `fetchOrigin(…, w)`, `restoreRepo(…, w)` | `log` |
+  | `git.go` params | `gitTo(…, w io.Writer)`, `gitErrTo(…, w)`, `fetchOrigin(…, w)`, `restoreRepo(…, w)` | `log` |
   | `git.go` params | `resolveBase(repoPath, dflt)`, `restoreRepo(repoPath, dflt, …)` | `defaultBranch` |
   | `run.go` params | `processRepo(…, c *capture)`, `openPR(…, c *capture)` | `output` |
   | `cli.go` param | `printUsage(w io.Writer, fs *pflag.FlagSet)` | `out`, `flags` |
@@ -430,43 +430,10 @@ itself.
   above, which renames it for a different reason (it stops being the default
   branch at all). Do that one first and this row disappears.
 
-- **The git helpers do not cover every shape they are asked for.** `git.go` has
-  three, distinguished only by what they do with the two streams — which is both
-  the point and the reason the names carry so little:
-
-  | helper | stdout | stderr | returns |
-  |---|---|---|---|
-  | `git` | captured, trimmed | discarded | `(string, error)` |
-  | `gitOK` | discarded | discarded | `bool` |
-  | `gitTo` | to `w` | to `w` | `error` |
-
-  A fourth shape — stdout discarded, stderr to `w` — has no helper, so
-  `restoreRepo` (`git.go:135`) drops to `exec.Command` and wires it up inline.
-  That is the only direct invocation left outside the helpers, and it is not an
-  oversight: `git branch -D` prints "Deleted branch …" on stdout, which is noise,
-  while its errors belong in the capture. The shape is legitimate, the
-  hand-rolling is not.
-
-  The smallest fix that pays: extract the two lines every one of them starts with
-  into `gitCmd(repoPath string, args ...string) *exec.Cmd`, and let all four
-  callers configure the streams they want. One place knows that git runs with
-  `Dir` set to the repo, and an oddball shape stops meaning "bypass the helpers".
-  Whether the fourth shape then deserves its own named wrapper is a judgement
-  call best made once the builder exists.
-
-  Two things worth deciding at the same time:
-
-  - **`git` throws stderr away**, so a failure reaches the caller as a bare
-    `exit status 1` and every call site invents its own prose (`could not create
-    branch`, `could not stage changes`). That is deliberate — those messages are
-    better than git's for the outcome line — but it means the actual git error is
-    unrecoverable for the ones that route through `git` rather than `gitTo`.
-    Capturing stderr into the returned error would cost nothing and give the
-    capture something to say when a repo fails inside a helper.
-  - **Every helper takes `repoPath` first**, which is a method receiver wearing a
-    disguise. A `repo` type with `r.git(…)` would delete that parameter from
-    thirteen signatures. Attractive, and much larger than the rest of this item —
-    worth it only if the file grows again.
+- **Every git helper takes `repoPath` first**, which is a method receiver
+  wearing a disguise. A `repo` type with `r.git(…)` would delete that parameter
+  from fourteen signatures in `git.go` alone. Attractive, and much larger than it
+  looks — worth doing only if the file grows again.
 
 - **`processRepo` is 127 lines** (`run.go:34`). It is the only function in the
   package over 100; `parseArgs` (52, `cli.go:84`) and `app.run` (41,

@@ -1,19 +1,28 @@
 package mkprs
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
 )
 
-// git runs a git command in repoPath and returns its trimmed stdout. Stderr is
-// discarded; callers that need it route output through gitTo instead.
-func git(repoPath string, args ...string) (string, error) {
+// gitCommand builds a git invocation rooted at repoPath. Every helper below
+// starts here, so one place knows how git is run and the helpers differ only in
+// what they do with the two streams -- which is the whole distinction between
+// them.
+func gitCommand(repoPath string, args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
-	out, err := cmd.Output()
-	return strings.TrimSpace(string(out)), err
+	return cmd
+}
+
+// git runs a git command in repoPath and returns its trimmed stdout. Stderr
+// does not reach the caller's output, but does reach the error -- see gitError.
+func git(repoPath string, args ...string) (string, error) {
+	out, err := gitCommand(repoPath, args...).Output()
+	return strings.TrimSpace(string(out)), gitError(err)
 }
 
 // gitOK reports whether a git command succeeded, ignoring all of its output.
@@ -24,11 +33,31 @@ func gitOK(repoPath string, args ...string) bool {
 
 // gitTo runs a git command with both streams sent to w.
 func gitTo(repoPath string, w io.Writer, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = repoPath
+	cmd := gitCommand(repoPath, args...)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	return cmd.Run()
+}
+
+// gitErrTo runs a git command with stdout discarded and stderr sent to w, for
+// the commands whose output is noise but whose complaints are not.
+func gitErrTo(repoPath string, w io.Writer, args ...string) error {
+	cmd := gitCommand(repoPath, args...)
+	cmd.Stderr = w
+	return cmd.Run()
+}
+
+// gitError folds git's own stderr into the error text. exec.Cmd.Output already
+// captures stderr into ExitError.Stderr, but Error() reports only "exit status
+// 1", so a caller that wraps the error loses the one line explaining it.
+func gitError(err error) error {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		if msg := strings.TrimSpace(string(exit.Stderr)); msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+	}
+	return err
 }
 
 // originURL is the configured (not insteadOf-rewritten) URL of origin.
@@ -136,8 +165,5 @@ func restoreRepo(repoPath, dflt, branch string, w io.Writer) {
 	_ = gitTo(repoPath, w, "checkout", dflt, "--quiet")
 	// Matches the original's `git branch -D ... >/dev/null`: the "Deleted
 	// branch" line is noise, but errors still belong in the capture.
-	cmd := exec.Command("git", "branch", "-D", branch)
-	cmd.Dir = repoPath
-	cmd.Stderr = w
-	_ = cmd.Run()
+	_ = gitErrTo(repoPath, w, "branch", "-D", branch)
 }
