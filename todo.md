@@ -93,7 +93,7 @@ Entries are unnumbered so nothing has to be renumbered as they come and go.
   real thing gives the same look at the same diff, and lets you continue.
 
   **It deliberately does not touch `--max-repos` or `--timeout`.** Prompting on
-  the repo count would turn a circuit breaker into a reflexive `y`, and the
+  the count would turn a circuit breaker into a reflexive `y`, and the
   friction of re-running is what makes you read the number. Prompting on a
   timeout would replace "fail and move on" with "block forever", which is the
   failure that flag exists to prevent.
@@ -130,6 +130,9 @@ know it would. Opt-out, not opt-in.
   flag away when the large run is intentional, never silent when it is not.
   Nested-repo discovery (see below) is the concrete way this bites: a tree can
   contain far more repos than it appears to.
+
+  Count after deduplication (see *Discovery*), or a repo named twice spends two
+  of the budget.
 
 - **Fail-fast option.** The main loop always continues after a failure. When the
   first repo fails because the command itself is wrong, you want to stop and fix
@@ -225,6 +228,89 @@ know it would. Opt-out, not opt-in.
   `dotnet outdated -u` and scaffolders create files), but a command that drops
   build artifacts in a repo with a thin `.gitignore` will commit them.
   `--tracked-only` stages with `git add -u` instead.
+
+## Discovery
+
+Three wrong answers, all reachable today, none needing a structural change.
+
+**The rule they share**: a target mkprs cannot interpret stops the run before
+any repo is touched. A target it understands but that yields no repos does not —
+`~/repos/*` picking up a plain `notes/` folder alongside the repos is ordinary,
+not a mistake. The line is whether the argument made sense, not whether it found
+work.
+
+That matches how `--max-repos` is specified above, and it is the shape argument
+errors should have in a tool that opens pull requests: everything checkable is
+checked before the first PR exists, because Ctrl-C does not take those back.
+
+- **A target dir inside a repo finds nothing, silently.** `discoverRepos` walks
+  *down* from each target looking for `.git` directories and never up, so
+  `mkprs ~/repos/app/src -b b -- …` prints `No target repositories found.` on
+  stderr and exits 0. Measured, not assumed. That is the worst shape a failure
+  can take: indistinguishable from a run where there was genuinely nothing to do.
+
+  **Fatal, and say what to do instead.** When the downward walk finds nothing and
+  `git rev-parse --show-toplevel` in the target succeeds:
+
+  ```
+  target is inside repository ~/repos/app; mkprs runs commands at the repo root,
+  so pass that instead
+  ```
+
+  Resolving up and running at the root was the alternative, and it is worse.
+  Someone who typed `app/src` may well have meant something to happen *in* `src`;
+  quietly running at `app` and committing the result is a surprise with a commit
+  attached. Refusing costs one retype and cannot be wrong. It also leaves the
+  door open for *Targets name repos, not directories within them* (see design
+  notes) without a behaviour change to walk back.
+
+  Not a `fail` outcome: `outcome` is what happened to a repo, and this is not a
+  repo. Making it one would need a pseudo-repo to hang it off, polluting the
+  result lines and the summary tally to describe a typo.
+
+  Only the case where the walk finds nothing pays for the extra `git` call, so a
+  target holding many repos is untouched.
+
+- **A missing or non-directory target only warns.** `Target directory does not
+  exist` goes to stderr and the run carries on
+  (`discover.go:22`, `TestRunWarnsAboutMissingTargetDir`). Same class of mistake
+  as the above, so it gets the same treatment: **fatal**. Two behaviours for one
+  kind of error is worse than either alone, and a warning is exactly what scrolls
+  past when the other forty targets are busy producing PRs.
+
+  The message is also wrong for a file — it exists, it is just not a directory.
+  Say which of the two it is.
+
+  This changes tested behaviour. `TestRunWarnsAboutMissingTargetDir` and the two
+  warning cases in `TestDiscoverRepos` all invert, and `discoverRepos` stops
+  taking a `warn io.Writer` and starts returning an error, which `run` turns into
+  a message and a non-zero exit.
+
+- **The same repo named twice is processed twice.** `discoverRepos` appends
+  across targets without deduplicating, so `mkprs ~/repos ~/repos/app` visits
+  `app` on both passes. Measured: the first pass opens the PR, the second skips
+  with `branch 'b' already exists on origin`, and the summary reports two
+  outcomes for one repo.
+
+  **Not fatal — deduplicate, and say so in one line.** Intent is unambiguous here
+  in a way it is not for a subfolder target: nobody means "process this repo
+  twice", so there is nothing to ask about, and refusing would break the
+  reasonable `mkprs ~/repos/* ~/repos/special` habit. But a run that silently
+  discards an argument someone typed is a small dishonesty that costs trust
+  later, so: `Ignored 1 duplicate target.`
+
+  **Deduplicate on the resolved target path, not on the repo.** Today every
+  target resolves to a repo root and the two are identical, so this costs
+  nothing. It is also what keeps the door open: under the deferred feature,
+  `packages/a` and `packages/b` are distinct paths that share a repo, and both
+  should survive. Repo-level dedup is the version that would have to be walked
+  back.
+
+  Keep a seen-set that preserves first occurrence rather than sorting the
+  combined list: order is currently lexical *within* each target dir, in the
+  order the targets were given, and a global sort would quietly change that.
+  `--max-repos` counts what is left afterwards, or a repo named twice spends two
+  of the budget.
 
 ## Replace `gh` with direct GitHub API calls
 
@@ -367,6 +453,36 @@ tests, not from having two production implementations.
   test rows carried indefinitely for nobody, and a REST `prOpener` would owe each
   of them a second or third API call (see *API notes*). `-r` stays because review
   requests are the one piece of PR metadata a batch run actually sets.
+
+- **Targets name repos, not directories within them.** Deferred, with the full
+  design worked out and then removed — `git log` has it if it comes back.
+
+  The idea: let target dirs name the directory the command runs in, so
+  `mkprs **/package.json -b b -- npm audit fix` handles repos where the manifest
+  is not at the root. The shell does the finding, which is the right division of
+  labour, and discovery resolves each target up to its repo root.
+
+  What sank it was not the discovery half — that part is cheap. It was that the
+  unit of work becomes the directory rather than the repo, and `outcome` is the
+  spine everything else hangs from: result lines, counters, and the capture a
+  failure replays. Per-directory outcomes meant splitting `report` into render
+  and count, a `rank()` for aggregating a repo's directories back into one
+  summary tally, a capture per directory, a reporter that emits N lines per repo
+  instead of streaming one, `commitAndPush` looping, per-directory commit
+  messages, `{}` diverging from `$REPO`, a new `$WORKDIR`, and a cap that counts
+  directories because `**/package.json` expands into every `node_modules` in the
+  tree. Seven of eight source files, and a partial undo of the work that got
+  `processRepo` from 127 lines to 25.
+
+  Against that: a hypothetical. .NET repos keep the solution at the root, npm
+  workspaces already handle the monorepo case from the root, and
+  `-- bash -c 'cd src && npm audit fix'` costs nothing today — the no-shell rule
+  was written with exactly that escape hatch in mind.
+
+  **Revisit only with a real repo where the `cd` workaround is genuinely
+  painful**, not on the strength of the design being interesting. What survives
+  is the *Discovery* section above: pointing at a subfolder should say so rather
+  than silently finding nothing, which is a bug on its own terms.
 
 - **No "I did manual work, just open the PR" mode.** Considered — adopt the
   branch the repo is already on, skip branch creation, allow no command, skip
