@@ -9,260 +9,279 @@ was ported to Go at strict parity and deleted, `test.sh` was replaced by
 mocked and, later, swapped for direct API calls.
 
 Completed items are deleted rather than marked done — `git log` is the record.
-Entries are unnumbered so nothing has to be renumbered as they come and go.
+Each item is a heading so the list can be skimmed from GitHub's outline, and
+nothing is numbered, so items can come and go without renumbering.
 
-## Scale & operability
+Decisions already settled — including the ones about what mkprs deliberately does
+*not* do — live in [`design-notes.md`](design-notes.md) and are not repeated here.
 
-- **`-i, --interactive` review gate.** Pause in each repo after the command has
-  run but before anything is staged, committed, pushed or opened, print the
-  diffstat, and ask. This is `git add -p` for a batch operation, and it should
-  borrow that key vocabulary rather than invent one:
+## Flags & UX
 
-  | key | meaning |
-  |---|---|
-  | `y` | commit this repo and open its PR |
-  | `n` | skip this repo, discarding the changes |
-  | `d` | show the full diff, then ask again |
-  | `s` | drop into a shell in the repo; on exit, re-read the diff and ask again |
-  | `a` | accept this and every remaining repo — stop asking |
-  | `q` | abort the run; this repo and the rest are left untouched |
+### `-i, --interactive` review gate
 
-  Notes that matter for the implementation:
+Pause in each repo after the command has run but before anything is staged,
+committed, pushed or opened, print the diffstat, and ask. This is `git add -p`
+for a batch operation, and it should borrow that key vocabulary rather than
+invent one:
 
-  - **Require a TTY.** If stdin is not a terminal, fail at startup with a clear
-    message rather than at the first prompt. `mkprs -i ... | tee log` from cron
-    must not hang waiting for a keypress it can never receive.
-  - **stdin is already free.** `cmd.Stdin` is never set (`runCommand`,
-    `run.go:137`), so the command runs against `/dev/null` and cannot swallow
-    keystrokes meant for the prompt. Keep it that way.
-  - **The prompt has a seam to land in.** `processRepo` now calls `runCommand`
-    and then `commitAndPush`; the pause goes between the two, with nothing to
-    disentangle first.
-  - **`n` is destructive.** Skipping falls through to `a.cleanup`, which checks
-    out the branch the repo started on and deletes the working branch — the
-    command's work is gone. Say so at the prompt, and treat
-    `--keep-branch` as the escape hatch for "I want to look at this properly".
-  - **`a` is just a latch**, a bool that suppresses later prompts. `q` needs to
-    stop the loop cleanly, letting the current repo's cleanup run.
-  - Skips are reported as normal (`⏭️`), so the summary still adds up.
+| key | meaning |
+|---|---|
+| `y` | commit this repo and open its PR |
+| `n` | skip this repo, discarding the changes |
+| `d` | show the full diff, then ask again |
+| `s` | drop into a shell in the repo; on exit, re-read the diff and ask again |
+| `a` | accept this and every remaining repo — stop asking |
+| `q` | abort the run; this repo and the rest are left untouched |
 
-  ### `s` — drop into a shell in the repo
+Notes that matter for the implementation:
 
-  The payoff of the whole feature. A codemod that handles 90% of repos leaves a
-  handful needing a human, and today that means aborting the run, fixing one repo
-  by hand, and starting over. This turns those into a detour: land in the repo on
-  the working branch, fix it, `exit`, carry on.
+- **Require a TTY.** If stdin is not a terminal, fail at startup with a clear
+  message rather than at the first prompt. `mkprs -i ... | tee log` from cron
+  must not hang waiting for a keypress it can never receive.
+- **stdin is already free.** `cmd.Stdin` is never set in `runCommand`, so the
+  command runs against `/dev/null` and cannot swallow keystrokes meant for the
+  prompt. Keep it that way.
+- **The prompt has a seam to land in.** `processRepo` calls `runCommand` and then
+  `commitAndPush`; the pause goes between the two, with nothing to disentangle
+  first.
+- **`n` is destructive.** Skipping falls through to `a.cleanup`, which checks out
+  the branch the repo started on and deletes the working branch — the command's
+  work is gone. Say so at the prompt, and treat `--keep-branch` as the escape
+  hatch for "I want to look at this properly".
+- **`a` is just a latch**, a bool that suppresses later prompts. `q` needs to
+  stop the loop cleanly, letting the current repo's cleanup run.
+- Skips are reported as normal (`⏭️`), so the summary still adds up.
 
-  - **Launch `$SHELL`**, falling back to `/bin/sh`. On Windows `$SHELL` is
-    normally unset, so fall back to `%COMSPEC%` (or `powershell`) — the tool
-    builds and is smoke-tested there, so this cannot be POSIX-only.
-  - **Working directory is the repo root**, matching where the command ran.
-  - **Pass the real terminal through** — `os.Stdin`, `os.Stdout`, `os.Stderr`
-    directly. This is the deliberate exception to how everything else runs:
-    commands get `/dev/null` on stdin and have their output captured, but a shell
-    that cannot see its own tty is useless, and the user's session must not end
-    up in the capture that a later failure replays.
-  - **Export `$REPO` and `$REPO_NAME`** exactly as the command gets them, plus
-    something like `$MKPRS_BRANCH` so a prompt can show what is going on. Being
-    dropped into a shell with no indication of which repo, or that a branch is
-    checked out under you, is disorienting.
-  - **Ignore the shell's exit code.** People type `exit 1` and hit Ctrl-D out of
-    habit; neither means "fail this repo".
-  - **Re-read the diff afterwards, never cache it.** The entire point is that the
-    working tree may have changed, so the prompt that follows must reflect what
-    is there now — including the case where the user reverted everything, which
-    should then fall through to the usual "command made no changes" skip.
+#### `s` — drop into a shell in the repo
 
-  **Hand-typed `git commit` is already handled.** It used to be read as "no
-  changes" and have its branch deleted; `processRepo` now decides via
-  `branchAhead` (`git rev-list --count <base>..<branch>`) instead of the index, so
-  a commit counts no matter who made it. Nothing extra is needed for `s` beyond
-  re-reading the diff.
+The payoff of the whole feature. A codemod that handles 90% of repos leaves a
+handful needing a human, and today that means aborting the run, fixing one repo
+by hand, and starting over. This turns those into a detour: land in the repo on
+the working branch, fix it, `exit`, carry on.
 
-  **`git checkout` inside the shell fails the repo**, by the same rule that
-  applies to the command itself — and the shell is exactly where someone would
-  reach for it. The failure is safe (the branch and its commits survive), but the
-  message is written for a command, not for someone standing in a prompt. Worth
-  either a clearer message under `-i` or an explicit note at the prompt that the
-  branch must stay put.
+- **Launch `$SHELL`**, falling back to `/bin/sh`. On Windows `$SHELL` is
+  normally unset, so fall back to `%COMSPEC%` (or `powershell`) — the tool
+  builds and is smoke-tested there, so this cannot be POSIX-only.
+- **Working directory is the repo root**, matching where the command ran.
+- **Pass the real terminal through** — `os.Stdin`, `os.Stdout`, `os.Stderr`
+  directly. This is the deliberate exception to how everything else runs:
+  commands get `/dev/null` on stdin and have their output captured, but a shell
+  that cannot see its own tty is useless, and the user's session must not end
+  up in the capture that a later failure replays.
+- **Export `$REPO` and `$REPO_NAME`** exactly as the command gets them, plus
+  something like `$MKPRS_BRANCH` so a prompt can show what is going on. Being
+  dropped into a shell with no indication of which repo, or that a branch is
+  checked out under you, is disorienting.
+- **Ignore the shell's exit code.** People type `exit 1` and hit Ctrl-D out of
+  habit; neither means "fail this repo".
+- **Re-read the diff afterwards, never cache it.** The entire point is that the
+  working tree may have changed, so the prompt that follows must reflect what
+  is there now — including the case where the user reverted everything, which
+  should then fall through to the usual "command made no changes" skip.
 
-  **This supersedes `--preview`**, which was going to run the command in a
-  throwaway `git worktree`, print a diffstat and discard the result. That is
-  strictly worse: it pays the full cost of running the command and then throws
-  the work away, so a run you approve of has to be done twice. Pausing on the
-  real thing gives the same look at the same diff, and lets you continue.
+**Hand-typed `git commit` is already handled.** It used to be read as "no
+changes" and have its branch deleted; `processRepo` now decides via `branchAhead`
+(`git rev-list --count <base>..<branch>`) instead of the index, so a commit counts
+no matter who made it. Nothing extra is needed for `s` beyond re-reading the diff.
 
-  **It deliberately does not touch `--max-repos` or `--timeout`.** Prompting on
-  the count would turn a circuit breaker into a reflexive `y`, and the
-  friction of re-running is what makes you read the number. Prompting on a
-  timeout would replace "fail and move on" with "block forever", which is the
-  failure that flag exists to prevent.
+**`git checkout` inside the shell fails the repo**, by the same rule that applies
+to the command itself — and the shell is exactly where someone would reach for
+it. The failure is safe (the branch and its commits survive), but the message is
+written for a command, not for someone standing in a prompt. Worth either a
+clearer message under `-i` or an explicit note at the prompt that the branch must
+stay put.
 
-- **`--list` to preview the repo set.** Print which repos pass the filters
-  (GitHub remote, clean tree, branch free) and exit without running anything.
-  Cheap, and it covers the "what would this touch?" half of the old `--dry-run`
-  that `-i` does not, since `-i` still runs the command before it asks.
+**This supersedes `--preview`**, which was going to run the command in a
+throwaway `git worktree`, print a diffstat and discard the result. That is
+strictly worse: it pays the full cost of running the command and then throws
+the work away, so a run you approve of has to be done twice. Pausing on the
+real thing gives the same look at the same diff, and lets you continue.
 
-Both of the next two are safety nets, so **both ship with a default on**. A limit
-you have to remember to pass is absent exactly when it matters: nobody types
-`--timeout` on the run where the command turns out to hang, because they did not
-know it would. Opt-out, not opt-in.
+**It deliberately does not touch `--max-repos` or the timeout.** Prompting on the
+count would turn a circuit breaker into a reflexive `y`, and the friction of
+re-running is what makes you read the number. Prompting on a timeout would
+replace "fail and move on" with "block forever", which is the failure that flag
+exists to prevent.
 
-- **Per-repo command timeout, defaulting to 10 minutes.** One hung command
-  stalls the whole run with no feedback, and serial execution means it stalls
-  every repo behind it. Run under `exec.CommandContext` with
-  `context.WithTimeout`; expiry is a normal per-repo failure
-  (`command timed out after 10m`), so the run continues and cleanup still fires
-  through the existing `defer a.cleanup`. `runCommand` is the whole surface this
-  touches: it already returns the error `processRepo` turns into that failure.
-  `--timeout <duration>` overrides,
-  `--timeout 0` disables. 10 minutes is chosen to sit well clear of a slow-but-real
-  `npm ci` or `dotnet restore` while still catching a wedged process the same
-  afternoon; tune it once there is evidence, but do not ship it unset.
+### `--list` to preview the repo set
 
-- **`--max-repos` safety limit, defaulting to 50.** Easy to point this at
-  `~/repos` and accidentally open 200 PRs. Hard-fail before any repo is touched
-  if discovery returns more than the cap, and make the message the fix:
-  `found 84 repositories, above the --max-repos limit of 50; re-run with
-  --max-repos 84 to proceed`. 50 clears the ~40-repo runs that are the normal
-  case here, so the guard stays invisible until something is genuinely wrong —
-  which is the only way a default like this survives contact with daily use. One
-  flag away when the large run is intentional, never silent when it is not.
-  Count after `dedupeRepos`, which `run` already applies, so a repo reached from
-  two targets does not spend two of the budget.
+Print which repos pass the filters (GitHub remote, clean tree, branch free) and
+exit without running anything. Cheap, and it covers the "what would this touch?"
+half of the old `--dry-run` that `-i` does not, since `-i` still runs the command
+before it asks.
 
-- **Stop discovery at the first repo found.** Today pruning stops descent into
-  the `.git` directory itself, not into the rest of the tree, so a repo nested
-  inside another repo is discovered and both are processed. Verified against
-  `~/Code`, where `CSharp/TestProjects` is a repo containing 10 nested repos and
-  all 11 are returned — a tree can contain far more repos than it appears to.
+### `--fail-fast` to stop at the first failure
 
-  Git itself discourages the arrangement: the inner repo has to be `.gitignore`d
-  by hand, and submodules exist for the case. So a nested repo found by accident
-  is more likely a stray checkout than something anyone wants a pull request
-  against. Prune the whole repo subtree instead: when a directory holds a `.git`
-  directory, record it and `fs.SkipDir` the directory rather than the `.git`.
+The main loop always continues after a failure. When the first repo fails because
+the command itself is wrong, you want to stop and fix it rather than watch 29
+more failures scroll by.
 
-  Naming one directly still works, and is not an error — `mkprs outer
-  outer/vendor/inner` processes both. That already falls out of the current
-  structure: an inner repo passed as a target is found by the walk as its own
-  root, so the "target is inside repository" check never runs for it. Worth a
-  test pinning it, since it is the half of the behaviour that is easy to lose
-  while implementing the other half.
+This also repairs `--verbose`, which is currently worse than the default for
+diagnosing a failure: quiet prints the failing repo's output as one contiguous
+block under its `❌`, while verbose streams those bytes live mixed with every
+other repo's and skips the replay. Stopping at the first failure makes that
+moot — one repo's worth of output, and it is the last thing on screen. This is
+the fix for that, rather than teaching verbose to replay; see *Make `--verbose`
+actually verbose*.
 
-  The `.git`-file check stays as-is, or submodules and linked worktrees start
-  being walked into — see the design note on why both are excluded.
+### Make `--verbose` actually verbose
 
-  Independently of nesting, this is the discovery speedup: today every repo's
-  full working tree is walked looking for more `.git` directories, which means
-  `node_modules`, `bin/obj`, `.venv`, all of it. Pruning at the root reads one
-  directory per repo instead. On a tree like `~/Code` that is likely the larger
-  cost, and it is paid on every run.
+Today it streams one thing — the user's command's two streams, prefixed
+`[repo]` — and nothing else. Everything mkprs itself does is either suppressed or
+routed somewhere the console never sees, so the flag shows the least interesting
+half of a run and hides the half that explains a skip. The rule to implement
+against: under `-v`, anything that would help when something goes wrong is on
+screen, as it happens.
 
-  Detection has to be a stat of `<dir>/.git` on entering each directory, not a
-  check of the `.git` entry itself: `fs.SkipDir` returned from a directory skips
-  *that* directory's contents, so returning it from `.git` cannot prune the
-  parent. Use `os.Lstat` rather than `os.Stat` — `d.IsDir()` on a `DirEntry` does
-  not follow symlinks, so a symlinked `.git` is excluded today and `os.Stat`
-  would quietly start including it.
+The gaps, in the order they bite:
 
-  Reduces the pressure behind `--max-repos` above but does not remove it: forty
-  sibling repos under one target is still forty pull requests.
+- **`git`/`gitOK` bypass the capture entirely.** `cmd.Output()` sends stdout to
+  a buffer and stderr into the error, so neither stream can reach the console at
+  any verbosity. That is `originURL`, `isCleanTree`, `getDefaultBranch`,
+  `branchLocation`, `resolveBase`, `headBranch`, `branchAhead`, and the
+  `diff --cached --quiet` check in `commitAndPush` — i.e. every filter that
+  decides a repo's fate. Their stdout *is* the return value, which is the
+  argument for swallowing it, but it is also the answer the user wants:
+  `status --porcelain` is precisely the list of files that made a repo skip as
+  "working tree not clean", and today that list is unobtainable without
+  re-running git by hand.
+- **Those errors are discarded at every call site.** `getDefaultBranch` failing
+  becomes `skip("could not determine default branch")`; `branchAhead` failing
+  becomes `fail("could not compare …")`. `gitError` now folds git's own words
+  into the returned error, but nothing writes it anywhere, so it dies at the
+  call site — in quiet mode as well as verbose. This one is a plain bug and
+  fixable independently of the rest.
+- **`--quiet`/`-q` on the mutating commands.** `checkout -b … --quiet`,
+  `commit -q`, `push … --quiet` and `fetch … --quiet` all route through `gitTo`,
+  so they would stream — the flag is what silences them. Under `-v` that costs
+  commit's "3 files changed, 40 insertions", checkout's "Switched to a new
+  branch", and push's `remote:` lines. Pass the quiet flags only when not
+  verbose. Do not reach for `--progress` on fetch/push to force the transfer
+  meter back: git suppresses it off a tty for good reason, and it is noise
+  rather than information.
+- **`git branch -D`'s stdout is discarded** by `gitErrTo` as noise, but
+  "Deleted branch bump-deps (was abc1234)" carries the only record of what was
+  just thrown away. Under `-v` it should print.
+- **The command is never echoed.** Output arrives attributed to a repo but not
+  to what produced it, and with git's own output added the mixture gets worse,
+  not better.
 
-- **Fail-fast option.** The main loop always continues after a failure. When the
-  first repo fails because the command itself is wrong, you want to stop and fix
-  it rather than watch 29 more failures scroll by. `--fail-fast`.
+#### Mark the lines that only exist because of `-v`
 
-  This also repairs `--verbose`, which is currently worse than the default for
-  diagnosing a failure: quiet prints the failing repo's output as one contiguous
-  block under its `❌`, while verbose streams those bytes live mixed with every
-  other repo's and skips the replay. Stopping at the first failure makes that
-  moot — one repo's worth of output, and it is the last thing on screen. This is
-  the fix for that, rather than teaching verbose to replay; see *Make `--verbose`
-  actually verbose* below.
+Two kinds of line, kept visually distinct, so a reader can tell mkprs's narration
+from the output it is narrating:
 
-- **Make `--verbose` actually verbose.** Today it streams one thing — the user's
-  command's two streams, prefixed `[repo]` — and nothing else. Everything mkprs
-  itself does is either suppressed or routed somewhere the console never sees, so
-  the flag shows the least interesting half of a run and hides the half that
-  explains a skip. The rule to implement against: under `-v`, anything that would
-  help when something goes wrong is on screen, as it happens.
+```
+[acme-web] $ git checkout -b bump-deps origin/main
+[acme-web] Switched to a new branch 'bump-deps'
+[acme-web] $ dotnet outdated -u
+[acme-web] Analyzing acme-web.csproj...
+```
 
-  The gaps, in the order they bite:
+The `$` marker borrows `set -x`, which is the same idea and already familiar.
+Echo before running, not after, so a hang is attributable to the line above it.
 
-  - **`git`/`gitOK` bypass the capture entirely.** `cmd.Output()` sends stdout to
-    a buffer and stderr into the error, so neither stream can reach the console at
-    any verbosity. That is `originURL`, `isCleanTree`, `getDefaultBranch`,
-    `branchLocation`, `resolveBase`, `headBranch`, `branchAhead`, and the
-    `diff --cached --quiet` check at `run.go:176` — i.e. every filter that decides
-    a repo's fate. Their stdout *is* the return value, which is the argument for
-    swallowing it, but it is also the answer the user wants: `status --porcelain`
-    is precisely the list of files that made a repo skip as "working tree not
-    clean", and today that list is unobtainable without re-running git by hand.
-  - **Those errors are discarded at every call site.** `getDefaultBranch` failing
-    becomes `skip("could not determine default branch")`; `branchAhead` failing
-    becomes `fail("could not compare …")`. `gitError` now folds git's own words
-    into the returned error, but nothing writes it anywhere, so it dies at the
-    call site — in quiet mode as well as verbose. This one is a plain bug and
-    fixable independently of the rest.
-  - **`--quiet`/`-q` on the mutating commands.** `checkout -b … --quiet`,
-    `commit -q`, `push … --quiet` and `fetch … --quiet` all route through `gitTo`,
-    so they would stream — the flag is what silences them. Under `-v` that costs
-    commit's "3 files changed, 40 insertions", checkout's "Switched to a new
-    branch", and push's `remote:` lines. Pass the quiet flags only when not
-    verbose. Do not reach for `--progress` on fetch/push to force the transfer
-    meter back: git suppresses it off a tty for good reason, and it is noise
-    rather than information.
-  - **`git branch -D`'s stdout is discarded** by `gitErrTo` as noise, but
-    "Deleted branch bump-deps (was abc1234)" carries the only record of what was
-    just thrown away. Under `-v` it should print.
-  - **The command is never echoed.** Output arrives attributed to a repo but not
-    to what produced it, and with git's own output added the mixture gets worse,
-    not better.
+**Trace lines go straight to `c.out`, never into `c.buf`.** The buffer is what a
+failure replays under `❌` in quiet mode, and it must keep holding exactly what
+the repo emitted — otherwise the two modes disagree about what happened. That
+also answers "which lines exist only because of verbosity" precisely: the
+`$` ones, and they never appear in a replay. A `func (c *capture) trace(format
+string, args ...any)` that no-ops unless `c.verbose` puts the condition in one
+place instead of at every call site.
 
-  ### Mark the lines that only exist because of `-v`
+**Do not add a replay for verbose.** A failure under `-v` already streamed
+everything live; reprinting it under the `❌` would double it. `--fail-fast` is
+the answer to "the failing repo's output is scattered among the others", and it
+is a better one than a replay.
 
-  Two kinds of line, kept visually distinct, so a reader can tell mkprs's
-  narration from the output it is narrating:
+**Echo `gh` too**, with its full argv — and when the REST `prOpener` lands, the
+method and URL in its place. That inherits the redaction constraint from
+*Replace `gh`*: the trace is printed verbatim, so an `Authorization` header must
+never be built into anything traceable. Worth a test that fixes this at the seam
+rather than a rule to remember.
 
-  ```
-  [acme-web] $ git checkout -b bump-deps origin/main
-  [acme-web] Switched to a new branch 'bump-deps'
-  [acme-web] $ dotnet outdated -u
-  [acme-web] Analyzing acme-web.csproj...
-  ```
+Most of the filters listed above now live in `preflight`, which is a contiguous
+block rather than six statements scattered through `processRepo` — so the trace
+lines land in one place.
 
-  The `$` marker borrows `set -x`, which is the same idea and already familiar.
-  Echo before running, not after, so a hang is attributable to the line above it.
+### `--tracked-only` staging
 
-  **Trace lines go straight to `c.out`, never into `c.buf`.** The buffer is what a
-  failure replays under `❌` in quiet mode, and it must keep holding exactly what
-  the repo emitted — otherwise the two modes disagree about what happened. That
-  also answers "which lines exist only because of verbosity" precisely: the
-  `$` ones, and they never appear in a replay. A `func (c *capture) trace(format
-  string, args ...any)` that no-ops unless `c.verbose` puts the condition in one
-  place instead of at every call site.
+`git add -A` stages everything the command left behind, including new files. That
+is the right default (tools like `dotnet outdated -u` and scaffolders create
+files), but a command that drops build artifacts in a repo with a thin
+`.gitignore` will commit them. `--tracked-only` stages with `git add -u` instead.
 
-  **Do not add a replay for verbose.** A failure under `-v` already streamed
-  everything live; reprinting it under the `❌` would double it. `--fail-fast`
-  above is the answer to "the failing repo's output is scattered among the
-  others", and it is a better one than a replay.
+## Discovery & safety limits
 
-  **Echo `gh` too**, with its full argv — and when the REST `prOpener` lands,
-  the method and URL in its place. That inherits the redaction constraint from
-  *Replace `gh`*: the trace is printed verbatim, so an `Authorization` header
-  must never be built into anything traceable. Worth a test that fixes this at
-  the seam rather than a rule to remember.
+The timeout and `--max-repos` are both safety nets, so **both ship with a default
+on**. A limit you have to remember to pass is absent exactly when it matters:
+nobody types `--timeout` on the run where the command turns out to hang, because
+they did not know it would. Opt-out, not opt-in.
 
-  Most of the filters listed above now live in `preflight`, which is a contiguous
-  block rather than six statements scattered through `processRepo` — so the trace
-  lines land in one place.
+### Per-repo command timeout, defaulting to 10 minutes
 
-- **`--tracked-only` staging.** `git add -A` stages everything the command left
-  behind, including new files. That is the right default (tools like
-  `dotnet outdated -u` and scaffolders create files), but a command that drops
-  build artifacts in a repo with a thin `.gitignore` will commit them.
-  `--tracked-only` stages with `git add -u` instead.
+One hung command stalls the whole run with no feedback, and serial execution
+means it stalls every repo behind it. Run under `exec.CommandContext` with
+`context.WithTimeout`; expiry is a normal per-repo failure (`command timed out
+after 10m`), so the run continues and cleanup still fires through the existing
+`defer a.cleanup`. `runCommand` is the whole surface this touches: it already
+returns the error `processRepo` turns into that failure. `--timeout <duration>`
+overrides, `--timeout 0` disables. 10 minutes is chosen to sit well clear of a
+slow-but-real `npm ci` or `dotnet restore` while still catching a wedged process
+the same afternoon; tune it once there is evidence, but do not ship it unset.
+
+### `--max-repos` safety limit, defaulting to 50
+
+Easy to point this at `~/repos` and accidentally open 200 PRs. Hard-fail before
+any repo is touched if discovery returns more than the cap, and make the message
+the fix: `found 84 repositories, above the --max-repos limit of 50; re-run with
+--max-repos 84 to proceed`. 50 clears the ~40-repo runs that are the normal case
+here, so the guard stays invisible until something is genuinely wrong — which is
+the only way a default like this survives contact with daily use. One flag away
+when the large run is intentional, never silent when it is not. Count after
+`dedupeRepos`, which `run` already applies, so a repo reached from two targets
+does not spend two of the budget.
+
+### Stop discovery at the first repo found
+
+Today pruning stops descent into the `.git` directory itself, not into the rest
+of the tree, so a repo nested inside another repo is discovered and both are
+processed. Verified against `~/Code`, where `CSharp/TestProjects` is a repo
+containing 10 nested repos and all 11 are returned — a tree can contain far more
+repos than it appears to.
+
+Git itself discourages the arrangement: the inner repo has to be `.gitignore`d
+by hand, and submodules exist for the case. So a nested repo found by accident
+is more likely a stray checkout than something anyone wants a pull request
+against. Prune the whole repo subtree instead: when a directory holds a `.git`
+directory, record it and `fs.SkipDir` the directory rather than the `.git`.
+
+Naming one directly still works, and is not an error — `mkprs outer
+outer/vendor/inner` processes both. That already falls out of the current
+structure: an inner repo passed as a target is found by the walk as its own
+root, so the "target is inside repository" check never runs for it. Worth a
+test pinning it, since it is the half of the behaviour that is easy to lose
+while implementing the other half.
+
+The `.git`-file check stays as-is, or submodules and linked worktrees start being
+walked into — see *Submodules and linked worktrees are both excluded from
+discovery* in [`design-notes.md`](design-notes.md).
+
+Independently of nesting, this is the discovery speedup: today every repo's
+full working tree is walked looking for more `.git` directories, which means
+`node_modules`, `bin/obj`, `.venv`, all of it. Pruning at the root reads one
+directory per repo instead. On a tree like `~/Code` that is likely the larger
+cost, and it is paid on every run.
+
+Detection has to be a stat of `<dir>/.git` on entering each directory, not a
+check of the `.git` entry itself: `fs.SkipDir` returned from a directory skips
+*that* directory's contents, so returning it from `.git` cannot prune the
+parent. Use `os.Lstat` rather than `os.Stat` — `d.IsDir()` on a `DirEntry` does
+not follow symlinks, so a symlinked `.git` is excluded today and `os.Stat`
+would quietly start including it.
+
+Reduces the pressure behind `--max-repos` but does not remove it: forty sibling
+repos under one target is still forty pull requests.
 
 ## Replace `gh` with direct GitHub API calls
 
@@ -353,206 +372,88 @@ requirement, which is the point of this whole item.
 **The seam stays.** `prOpener` earns its place from `fakePR` in the end-to-end
 tests, not from having two production implementations.
 
-## Design notes (decided, not TODO)
+## Polish
 
-- **Submodules and linked worktrees are both excluded from discovery.** Only
-  `.git` *directories* count; a submodule's `.git` and a `git worktree` checkout's
-  `.git` are each a file holding a `gitdir:` pointer, so one rule covers both.
-  `discoverRepos` (`internal/mkprs/discover.go`) keys off `d.IsDir()` for exactly
-  this reason.
+### There is no `README.md`
 
-  Excluding worktrees is deliberate, not a side effect. A worktree is a second
-  checkout of a repo mkprs would reach anyway, and this tool makes one specific
-  change against one repo's default branch — making it twice is not meaningful.
-  Worse, `dedupeRepos` keys on path, so a worktree of an already-discovered repo
-  would not dedupe: two entries, two branches, two pull requests against the same
-  GitHub repo.
-- **No `-c "shell string"` mode.** The command is argv after `--`, executed
-  directly — no `eval`, no re-parsing. When a pipe or glob is needed, write
-  `-- bash -c '...'` explicitly so the eval boundary is visible at the call site.
-- **`{}` substitution over `-I`-style configurable placeholders.** `{}` matches
-  `find` muscle memory, and since the command is always last there is no need for
-  find's `\;` terminator.
-- **CWD is the repo root** (`find -execdir` semantics, not `-exec`), so relative
-  paths in commands behave the way they would if you had cd'd in yourself.
-- **PRs always target the repo's own default branch.** No `--pr-base` override:
-  the base and the branch's fork point have to agree for the PR's diff to be
-  exactly the commit the run made. This holds even when the command supplies its
-  own head branch, below.
-- **The command must leave the repo on the branch mkprs created.** Staging and
-  committing act on whatever HEAD points at, so a command that runs
-  `git checkout` would have its work committed to a branch mkprs does not own —
-  or, if it landed on the default branch, pushed straight to `main`. Any switch,
-  and a detached HEAD, fails that repo — and since a failure is not cleaned up,
-  everything it created survives, mkprs's own branch included.
+The repo has `LICENSE`, `go.mod`, `go.sum`, `main.go`, `internal/` and two
+markdown files — someone landing on it from GitHub gets no idea what mkprs is,
+and `todo.md` is the closest thing to documentation, which reads as a backlog
+rather than an introduction.
 
-- **A failed repo is not cleaned up at all.** Cleanup is all or nothing: the
-  checkout back to the default branch is what makes deleting the branch safe, and
-  on its own it is actively harmful. mkprs's branch is cut from the default
-  branch, so nothing conflicts and `git checkout` carries the command's
-  uncommitted edits across with it — they end up stranded as dirty state on the
-  default branch while the branch that explains them is deleted. Measured, not
-  assumed: a modified file and an untracked one both follow the checkout.
+Worth covering, roughly in this order:
 
-  So a failure leaves branch, commits and working tree exactly as they were. The
-  push failure is the case that proves it — origin has no copy, so deleting the
-  branch there is the one path that genuinely destroys work — but the rule is
-  uniform across every failure rather than one rule per step. The repo sitting on
-  mkprs's branch is also the signal that it needs attention.
+- **What it is, in two sentences**, with one example that shows the whole
+  shape. The `dotnet outdated -u` one from `usageTail` earns its place: run a
+  command across every repo under a directory, commit, open a PR each.
+- **Install.** `go install github.com/jarrettgilliam/mkprs@latest`, plus the
+  `gh` prerequisite and `gh auth login` — today a user without the GitHub CLI
+  finds out by watching every repo fail. (*Replace `gh`* above removes that
+  requirement; until it lands the README has to state it.)
+- **How it behaves per repo**: cut a branch from the default branch, run the
+  command, `git add -A`, commit, push, open the PR against the default branch,
+  then restore and delete the branch. The skip and failure conditions belong
+  here too — that is the part `--help` states tersely and a reader actually
+  needs prose for.
+- **The `{}` / `$REPO` / `$REPO_NAME` contract** and the no-shell rule.
 
-  Skips still clean up: "command made no changes" leaves nothing worth keeping.
+**Do not restate the flag table.** It lives in `usageHead` and pflag's generated
+`FlagUsages`, and a copy in the README will drift the first time a flag is added
+— several items under *Flags & UX* above add one. Link to `mkprs --help` and keep
+the README to the parts that are stable.
 
-- **`-k` skips cleanup entirely, and there is no second flag for staying on the
-  branch.** Keeping the branch but checking out the default one was considered
-  and dropped for the reason above: the checkout drags uncommitted edits with it,
-  so "keep the branch, restore the repo" is not a coherent halfway house. Not
-  having to `git checkout` is most of the point anyway — the branch is on origin
-  once the PR is open, so `git checkout -b <branch> origin/<branch>` recovers a
-  deleted one nearly as cheaply as `-k` avoids it, and a flag that only means
-  something alongside another flag would be earning very little.
+Same risk applies to the examples, which is an argument for using few and
+choosing ones tied to behaviour that will not change.
 
-- **No `--label`, `--assignee` or `--milestone` passthrough.** `gh pr create`
-  supports all three and each is a one-line addition to `ghArgs`, but they are
-  not used here — so they would be flags, config fields, `pullRequest` fields and
-  test rows carried indefinitely for nobody, and a REST `prOpener` would owe each
-  of them a second or third API call (see *API notes*). `-r` stays because review
-  requests are the one piece of PR metadata a batch run actually sets.
+**Write this last.** Almost every open item above changes something the README
+would have to state: the flags under *Flags & UX* and *Discovery & safety limits*
+each add a line, and *Replace `gh`* removes the install prerequisite entirely.
+Documenting the tool before those land means writing prose with a known expiry
+date. The cost of having no README is borne by strangers arriving from GitHub,
+which is not yet the audience; the cost of a stale one is borne by them too, and
+is worse, because it is believed.
 
-- **Targets name repos, not directories within them.** Deferred, with the full
-  design worked out and then removed — `git log` has it if it comes back.
+### Spell out names that outlive their line
 
-  The idea: let target dirs name the directory the command runs in, so
-  `mkprs **/package.json -b b -- npm audit fix` handles repos where the manifest
-  is not at the root. The shell does the finding, which is the right division of
-  labour, and discovery resolves each target up to its repo root.
+Single letters are fine for a local whose declaration is visible from its use.
+They are not fine for struct fields, package-level declarations, or parameters,
+where the reader meets the name far from anything that explains it. A good name
+deletes the comment that would have explained it.
 
-  What sank it was not the discovery half — that part is cheap. It was that the
-  unit of work becomes the directory rather than the repo, and `outcome` is the
-  spine everything else hangs from: result lines, counters, and the capture a
-  failure replays. Per-directory outcomes meant splitting `report` into render
-  and count, a `rank()` for aggregating a repo's directories back into one
-  summary tally, a capture per directory, a reporter that emits N lines per repo
-  instead of streaming one, `commitAndPush` looping, per-directory commit
-  messages, `{}` diverging from `$REPO`, a new `$WORKDIR`, and a cap that counts
-  directories because `**/package.json` expands into every `node_modules` in the
-  tree. Seven of eight source files, and a partial undo of the work that got
-  `processRepo` from 127 lines to 25.
+Receivers stay short (`a`, `c`, `o`, `r`) — that is Go convention, not laziness,
+and `func (c *capture)` reads fine because the type is right there.
+`Write(p []byte)` keeps its parameter name to match `io.Writer`.
 
-  Against that: a hypothetical. .NET repos keep the solution at the root, npm
-  workspaces already handle the monorepo case from the root, and
-  `-- bash -c 'cd src && npm audit fix'` costs nothing today — the no-shell rule
-  was written with exactly that escape hatch in mind.
+The actual offenders, all `internal/mkprs`:
 
-  **Revisit only with a real repo where the `cd` workaround is genuinely
-  painful**, not on the strength of the design being interesting. What survived
-  the discussion was shipped separately: a subfolder target now names the repo
-  it is inside and stops the run, rather than silently finding nothing, which
-  was a bug on its own terms.
+| where | now | suggested |
+|---|---|---|
+| `outcome.go` field | `outcomeFailed.c` | `output` |
+| `mkprs.go` field | `app.errw` | `errOut` |
+| `git.go` params | `gitTo(…, w io.Writer)`, `gitErrTo(…, w)`, `fetchOrigin(…, w)`, `restoreRepo(…, w)` | `log` |
+| `git.go` param | `resolveBase(repoPath, dflt)` | `defaultBranch` |
+| `run.go` params | `c *capture`, in all six of `processRepo`, `openPR`, `preflight`, `cleanup`, `runCommand`, `commitAndPush` | `output` |
+| `cli.go` param | `printUsage(w io.Writer, fs *pflag.FlagSet)` | `out`, `flags` |
 
-- **No "I did manual work, just open the PR" mode.** Considered — adopt the
-  branch the repo is already on, skip branch creation, allow no command, skip
-  cleanup — and dropped. `gh pr create` already infers base and head and fills
-  title and body from the commits, so a shell loop over `gh pr create --fill`
-  does the whole job. Inside mkprs it would cost a conditional `-b`, a new
-  per-repo source for the commit message and PR title (both currently derive from
-  the command text), and a second path through `processRepo` that every later
-  feature would have to reason about. An implicit trigger is also a trap: a batch
-  run would silently adopt a repo left on an old branch and open a PR mixing
-  unrelated work. Manual edits do not scale to forty repos, which is where mkprs
-  earns its keep, so the case is weakest exactly where the cost is highest.
-- **No mutation testing.** Considered as a way to grade the suite, and rejected
-  on the state of the tooling rather than the idea. It is a niche practice in Go
-  — no large project runs it, and the most visible effort (mutation testing the
-  stdlib's crypto assembly for Go 1.26) bypassed the frameworks and patched
-  `cmd/asm` instead. The best available option, Gremlins, is pre-1.0 and sat
-  dormant for 27 months between releases. Revisit only if something reaches 1.0
-  with real adoption.
-- **Execution stays serial.** `-j/--jobs` over `errgroup` was long treated as the
-  headline feature — it was the stated reason for leaving bash — and has been
-  dropped anyway. Most batch commands are fast enough that the wall-clock saving
-  does not pay for the complexity, and the tool is worth more correct than quick
-  while its behaviour is still being validated. It also costs less than it looks:
-  serial runs are what let a failure replay its whole capture as one contiguous
-  block, keep result lines one-per-line without a mutex, and make `--verbose`
-  readable at all. Revisit only with evidence of a run that is genuinely too
-  slow, not on principle.
+`outcomeFailed.c` is the one that proves the point: it carries a three-line
+comment whose first job is saying what the field *is*. Named `output`, only the
+non-obvious half needs to survive — that it is still being written to when the
+outcome is built, because the deferred `restoreRepo` runs before the caller
+reports.
 
-## Lower-priority polish
+`config`'s fields, the `usage*` constants and the `exit*` constants are already
+fine; this is not a sweep of everything short.
 
-- **There is no `README.md`.** The repo has `LICENSE`, `go.mod`, `main.go` and
-  this file — someone landing on it from GitHub gets no idea what mkprs is, and
-  `todo.md` is the closest thing to documentation, which reads as a backlog
-  rather than an introduction.
+### A `repo` type for the git helpers
 
-  Worth covering, roughly in this order:
+Every git helper takes `repoPath` first, which is a method receiver wearing a
+disguise. A `repo` type with `r.git(…)` would delete that parameter from fifteen
+signatures in `git.go` alone. Attractive, and much larger than it looks — worth
+doing only if the file grows again.
 
-  - **What it is, in two sentences**, with one example that shows the whole
-    shape. The `dotnet outdated -u` one from `usageTail` earns its place: run a
-    command across every repo under a directory, commit, open a PR each.
-  - **Install.** `go install github.com/jarrettgilliam/mkprs@latest`, plus the
-    `gh` prerequisite and `gh auth login` — today a user without the GitHub CLI
-    finds out by watching every repo fail. (The *Replace `gh`* section above
-    removes that requirement; until it lands the README has to state it.)
-  - **How it behaves per repo**: cut a branch from the default branch, run the
-    command, `git add -A`, commit, push, open the PR against the default branch,
-    then restore and delete the branch. The skip and failure conditions belong
-    here too — that is the part `--help` states tersely and a reader actually
-    needs prose for.
-  - **The `{}` / `$REPO` / `$REPO_NAME` contract** and the no-shell rule.
+### Trailing-flag robustness
 
-  **Do not restate the flag table.** It lives in `usageHead` and pflag's
-  generated `FlagUsages`, and a copy in the README will drift the first time a
-  flag is added — every item under *Pull requests* above adds one. Link to
-  `mkprs --help` and keep the README to the parts that are stable.
-
-  Same risk applies to the examples, which is an argument for using few and
-  choosing ones tied to behaviour that will not change.
-
-  **Write this last.** Almost every open item above changes something the README
-  would have to state: the flags under *Pull requests* and *Scale & operability*
-  each add a line, and *Replace `gh`* removes the install prerequisite
-  entirely. Documenting the tool before
-  those land means writing prose with a known expiry date. The cost of having no
-  README is borne by strangers arriving from GitHub, which is not yet the
-  audience; the cost of a stale one is borne by them too, and is worse, because
-  it is believed.
-
-- **Spell out names that outlive their line.** Single letters are fine for a
-  local whose declaration is visible from its use. They are not fine for struct
-  fields, package-level declarations, or parameters, where the reader meets the
-  name far from anything that explains it. A good name deletes the comment that
-  would have explained it.
-
-  Receivers stay short (`a`, `c`, `o`, `r`) — that is Go convention, not
-  laziness, and `func (c *capture)` reads fine because the type is right there.
-  `Write(p []byte)` keeps its parameter name to match `io.Writer`.
-
-  The actual offenders, all `internal/mkprs`:
-
-  | where | now | suggested |
-  |---|---|---|
-  | `outcome.go` field | `outcomeFailed.c` | `output` |
-  | `mkprs.go` field | `app.errw` | `errOut` |
-  | `git.go` params | `gitTo(…, w io.Writer)`, `gitErrTo(…, w)`, `fetchOrigin(…, w)`, `restoreRepo(…, w)` | `log` |
-  | `git.go` param | `resolveBase(repoPath, dflt)` | `defaultBranch` |
-  | `run.go` params | `c *capture`, in all six of `processRepo`, `openPR`, `preflight`, `cleanup`, `runCommand`, `commitAndPush` | `output` |
-  | `cli.go` param | `printUsage(w io.Writer, fs *pflag.FlagSet)` | `out`, `flags` |
-
-  `outcomeFailed.c` is the one that proves the point: it carries a three-line
-  comment whose first job is saying what the field *is*. Named `output`, only the
-  non-obvious half needs to survive — that it is still being written to when the
-  outcome is built, because the deferred `restoreRepo` runs before the caller
-  reports.
-
-  `config`'s fields, the `usage*` constants and the `exit*` constants are already
-  fine; this is not a sweep of everything short.
-
-- **Every git helper takes `repoPath` first**, which is a method receiver
-  wearing a disguise. A `repo` type with `r.git(…)` would delete that parameter
-  from fourteen signatures in `git.go` alone. Attractive, and much larger than it
-  looks — worth doing only if the file grows again.
-
-- **Trailing-flag robustness**: `mkprs tgt -b -- true` silently takes `--` as the
-  branch name, then fails with "no command specified" because the terminator was
-  consumed. pflag has no required-value guard for this; an explicit check that no
-  flag value starts with `--` would give a better message.
+`mkprs tgt -b -- true` silently takes `--` as the branch name, then fails with
+"no command specified" because the terminator was consumed. pflag has no
+required-value guard for this; an explicit check that no flag value starts with
+`--` would give a better message.
