@@ -727,21 +727,141 @@ func TestRunMultipleReposAndDirs(t *testing.T) {
 	}
 }
 
-func TestRunWarnsAboutMissingTargetDir(t *testing.T) {
+// A bad target stops the run before any repo is touched. It used to warn and
+// carry on, which meant the other targets went ahead and opened pull requests
+// that Ctrl-C could not take back.
+func TestRunRejectsABadTargetDir(t *testing.T) {
 	t.Parallel()
 
 	f := newFixture(t)
 	f.repo("x")
 	missing := filepath.Join(f.root, "nope")
+	prs := &fakePR{}
 
-	got := run(t, &fakePR{}, []string{f.targets, missing, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
+	got := run(t, prs, []string{f.targets, missing, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
 
-	if !strings.Contains(got.stderr, "Target directory does not exist: "+missing) {
-		t.Errorf("stderr = %q, want a warning", got.stderr)
+	if got.code != exitUsage {
+		t.Errorf("exit code = %d, want %d", got.code, exitUsage)
 	}
-	if !strings.Contains(got.stdout, "✅ x PR created") {
-		t.Errorf("the surviving repo should still be processed:\n%s", got.stdout)
+	if !strings.Contains(got.stderr, "target directory does not exist: "+missing) {
+		t.Errorf("stderr = %q, want the reason", got.stderr)
 	}
+	// The valid target is not a consolation prize: nothing runs.
+	if len(prs.calls) != 0 {
+		t.Errorf("opened %d PRs, want none", len(prs.calls))
+	}
+	if strings.Contains(got.stdout, "PR created") {
+		t.Errorf("a repo was processed despite the bad target:\n%s", got.stdout)
+	}
+}
+
+// `mkprs ~/repos/*` sweeps up whatever sits alongside the repos. Those targets
+// are ignored rather than fatal -- but counted, so a glob that matched nothing
+// useful does not look like a run with nothing to do.
+func TestRunIgnoresTargetsWithoutRepos(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	repo := f.repo("x")
+	notes := filepath.Join(f.root, "notes")
+	mkdir(t, notes)
+	readme := filepath.Join(f.root, "README.md")
+	writeFile(t, readme, "x")
+	prs := &fakePR{}
+
+	got := run(t, prs, []string{repo, notes, readme, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+	if got.code != exitOK {
+		t.Errorf("exit code = %d, want %d", got.code, exitOK)
+	}
+	if len(prs.calls) != 1 {
+		t.Fatalf("opened %d PRs, want 1:\n%s", len(prs.calls), got.all())
+	}
+	if !strings.Contains(got.stderr, "Ignored 2 targets with no repositories.") {
+		t.Errorf("stderr = %q, want the ignored targets reported", got.stderr)
+	}
+	// The count is the whole story when quiet: forty repos and three strays
+	// should not cost three lines every run.
+	for _, path := range []string{notes, readme} {
+		if strings.Contains(got.stderr, path) {
+			t.Errorf("stderr named %q without --verbose:\n%s", path, got.stderr)
+		}
+	}
+}
+
+// Under --verbose the count is not enough: which targets were dropped is
+// exactly what you need to see when a glob did not match what you expected.
+func TestRunVerboseListsIgnoredTargets(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	repo := f.repo("x")
+	notes := filepath.Join(f.root, "notes")
+	mkdir(t, notes)
+	readme := filepath.Join(f.root, "README.md")
+	writeFile(t, readme, "x")
+
+	got := run(t, &fakePR{}, []string{repo, notes, readme, "-b", "b", "-v"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+	if !strings.Contains(got.stderr, "Ignored 2 targets with no repositories.") {
+		t.Errorf("stderr = %q, want the count as well", got.stderr)
+	}
+	for _, path := range []string{notes, readme} {
+		if !strings.Contains(got.stderr, path) {
+			t.Errorf("stderr = %q, want it to name %q", got.stderr, path)
+		}
+	}
+}
+
+// Overlapping targets used to process a repo twice: the first pass opened the
+// PR, the second skipped with `branch 'b' already exists on origin`, and the
+// summary reported two outcomes for one repo.
+func TestRunDeduplicatesRepos(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	repo := f.repo("x")
+	prs := &fakePR{}
+
+	got := run(t, prs, []string{f.targets, repo, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+	if got.code != exitOK {
+		t.Errorf("exit code = %d, want %d", got.code, exitOK)
+	}
+	if len(prs.calls) != 1 {
+		t.Errorf("opened %d PRs, want 1", len(prs.calls))
+	}
+	if strings.Contains(got.stdout, "already exists") {
+		t.Errorf("the repo was processed twice:\n%s", got.stdout)
+	}
+	for _, want := range []string{"Succeeded: 1", "Skipped:   0"} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("summary missing %q:\n%s", want, got.stdout)
+		}
+	}
+	// Silently discarding an argument someone typed is a small dishonesty.
+	if !strings.Contains(got.stderr, "Ignored 1 duplicate repository.") {
+		t.Errorf("stderr = %q, want the duplicate to be reported", got.stderr)
+	}
+	if strings.Contains(got.stderr, repo) {
+		t.Errorf("stderr named %q without --verbose:\n%s", repo, got.stderr)
+	}
+
+	t.Run("verbose names it", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+
+		got := run(t, &fakePR{}, []string{f.targets, repo, "-b", "b", "-v"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if !strings.Contains(got.stderr, "Ignored 1 duplicate repository.") {
+			t.Errorf("stderr = %q, want the count as well", got.stderr)
+		}
+		if !strings.Contains(got.stderr, repo) {
+			t.Errorf("stderr = %q, want it to name %q", got.stderr, repo)
+		}
+	})
 }
 
 // By default, a repo's own output is captured, not printed. --verbose streams it

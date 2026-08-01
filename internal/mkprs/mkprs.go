@@ -60,10 +60,35 @@ func (a *app) run() int {
 		a.cfg.title = firstLine(a.cfg.message)
 	}
 
+	// A target that cannot be interpreted stops the run here, before the first
+	// repo is touched -- once pull requests exist, Ctrl-C does not take them
+	// back, so everything checkable is checked up front.
 	var repos []string
+	var barren []string
 	for _, dir := range a.cfg.targetDirs {
-		repos = discoverRepos(dir, repos, a.errw)
+		before := len(repos)
+
+		var err error
+		if repos, err = discoverRepos(dir, repos); err != nil {
+			fmt.Fprintf(a.errw, "Error: %v\n", err)
+			return exitUsage
+		}
+
+		// A target that holds no repos is ordinary -- `~/repos/*` sweeps up a
+		// notes/ folder and a README alongside them -- but counting it keeps a
+		// glob that matched nothing useful from looking like a run with nothing
+		// to do.
+		if len(repos) == before {
+			barren = append(barren, dir)
+		}
 	}
+	a.reportIgnored(barren, "target with no repositories", "targets with no repositories")
+
+	// Overlapping targets are an argument mistake with unambiguous intent, so
+	// this deduplicates rather than refusing -- but says so, because silently
+	// discarding an argument someone typed is its own kind of wrong.
+	repos, dropped := dedupeRepos(repos)
+	a.reportIgnored(dropped, "duplicate repository", "duplicate repositories")
 
 	if len(repos) == 0 {
 		fmt.Fprintln(a.errw, "No target repositories found.")
@@ -92,6 +117,32 @@ func (a *app) run() int {
 
 	rep.summary()
 	return exitOK
+}
+
+// reportIgnored accounts for arguments the run discarded. Discarding one
+// silently is a small dishonesty, but naming each of them is noise on a run
+// where forty repos sit beside three strays -- so the count is always printed
+// and the paths only under --verbose, which is where "why did my glob not match
+// what I expected" gets answered.
+func (a *app) reportIgnored(paths []string, one, many string) {
+	n := len(paths)
+	if n == 0 {
+		return
+	}
+
+	fmt.Fprintf(a.errw, "Ignored %d %s.\n", n, plural(n, one, many))
+	if a.cfg.verbose {
+		for _, path := range paths {
+			fmt.Fprintf(a.errw, "    %s\n", path)
+		}
+	}
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func firstLine(s string) string {
