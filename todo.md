@@ -242,7 +242,7 @@ when the large run is intentional, never silent when it is not. Count after
 `dedupeRepos`, which `run` already applies, so a repo reached from two targets
 does not spend two of the budget.
 
-### Stop discovery at the first repo found
+### Stop discovery depth search at the first repo found
 
 Today pruning stops descent into the `.git` directory itself, not into the rest
 of the tree, so a repo nested inside another repo is discovered and both are
