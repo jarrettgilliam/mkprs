@@ -163,7 +163,85 @@ know it would. Opt-out, not opt-in.
   diagnosing a failure: quiet prints the failing repo's output as one contiguous
   block under its `❌`, while verbose streams those bytes live mixed with every
   other repo's and skips the replay. Stopping at the first failure makes that
-  moot — one repo's worth of output, and it is the last thing on screen.
+  moot — one repo's worth of output, and it is the last thing on screen. This is
+  the fix for that, rather than teaching verbose to replay; see *Make `--verbose`
+  actually verbose* below.
+
+- **Make `--verbose` actually verbose.** Today it streams one thing — the user's
+  command's two streams, prefixed `[repo]` — and nothing else. Everything mkprs
+  itself does is either suppressed or routed somewhere the console never sees, so
+  the flag shows the least interesting half of a run and hides the half that
+  explains a skip. The rule to implement against: under `-v`, anything that would
+  help when something goes wrong is on screen, as it happens.
+
+  The gaps, in the order they bite:
+
+  - **`git`/`gitOK` bypass the capture entirely.** `cmd.Output()` sends stdout to
+    a buffer and stderr into the error, so neither stream can reach the console at
+    any verbosity. That is `originURL`, `isCleanTree`, `getDefaultBranch`,
+    `branchLocation`, `resolveBase`, `headBranch`, `branchAhead`, and the
+    `diff --cached --quiet` check at `run.go:133` — i.e. every filter that decides
+    a repo's fate. Their stdout *is* the return value, which is the argument for
+    swallowing it, but it is also the answer the user wants: `status --porcelain`
+    is precisely the list of files that made a repo skip as "working tree not
+    clean", and today that list is unobtainable without re-running git by hand.
+  - **Those errors are discarded at every call site.** `getDefaultBranch` failing
+    becomes `skip("could not determine default branch")`; `branchAhead` failing
+    becomes `fail("could not compare …")`. `gitError` now folds git's own words
+    into the returned error, but nothing writes it anywhere, so it dies at the
+    call site — in quiet mode as well as verbose. This one is a plain bug and
+    fixable independently of the rest.
+  - **`--quiet`/`-q` on the mutating commands.** `checkout -b … --quiet`,
+    `commit -q`, `push … --quiet` and `fetch … --quiet` all route through `gitTo`,
+    so they would stream — the flag is what silences them. Under `-v` that costs
+    commit's "3 files changed, 40 insertions", checkout's "Switched to a new
+    branch", and push's `remote:` lines. Pass the quiet flags only when not
+    verbose. Do not reach for `--progress` on fetch/push to force the transfer
+    meter back: git suppresses it off a tty for good reason, and it is noise
+    rather than information.
+  - **`git branch -D`'s stdout is discarded** by `gitErrTo` as noise, but
+    "Deleted branch bump-deps (was abc1234)" carries the only record of what was
+    just thrown away. Under `-v` it should print.
+  - **The command is never echoed.** Output arrives attributed to a repo but not
+    to what produced it, and with git's own output added the mixture gets worse,
+    not better.
+
+  ### Mark the lines that only exist because of `-v`
+
+  Two kinds of line, kept visually distinct, so a reader can tell mkprs's
+  narration from the output it is narrating:
+
+  ```
+  [acme-web] $ git checkout -b bump-deps origin/main
+  [acme-web] Switched to a new branch 'bump-deps'
+  [acme-web] $ dotnet outdated -u
+  [acme-web] Analyzing acme-web.csproj...
+  ```
+
+  The `$` marker borrows `set -x`, which is the same idea and already familiar.
+  Echo before running, not after, so a hang is attributable to the line above it.
+
+  **Trace lines go straight to `c.out`, never into `c.buf`.** The buffer is what a
+  failure replays under `❌` in quiet mode, and it must keep holding exactly what
+  the repo emitted — otherwise the two modes disagree about what happened. That
+  also answers "which lines exist only because of verbosity" precisely: the
+  `$` ones, and they never appear in a replay. A `func (c *capture) trace(format
+  string, args ...any)` that no-ops unless `c.verbose` puts the condition in one
+  place instead of at every call site.
+
+  **Do not add a replay for verbose.** A failure under `-v` already streamed
+  everything live; reprinting it under the `❌` would double it. `--fail-fast`
+  above is the answer to "the failing repo's output is scattered among the
+  others", and it is a better one than a replay.
+
+  **Echo `gh` too**, with its full argv — and when the REST `prOpener` lands,
+  the method and URL in its place. That inherits the redaction constraint from
+  *Replace `gh`*: the trace is printed verbatim, so an `Authorization` header
+  must never be built into anything traceable. Worth a test that fixes this at
+  the seam rather than a rule to remember.
+
+  **Sequencing**: after *`processRepo` is 127 lines* below, since the echo lands
+  next to every step in that function's spine.
 
 - **`--tracked-only` staging.** `git add -A` stages everything the command left
   behind, including new files. That is the right default (tools like
