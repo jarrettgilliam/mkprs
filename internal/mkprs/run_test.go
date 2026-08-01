@@ -303,10 +303,10 @@ func TestRunCommandThatCommitsItsOwnWork(t *testing.T) {
 	})
 }
 
-// mkprs cuts its branch from the repo's default branch and returns there when it
-// is done, so it only runs on a repo that started there. Anything else is a
-// normal state of a repo, not a failure.
-func TestRunRequiresDefaultBranch(t *testing.T) {
+// The branch mkprs works on is cut from origin's default branch, so whatever was
+// checked out when the run started never contributes to it -- it is only where
+// the repo gets put back. A detached HEAD is the exception: no name to record.
+func TestRunStartsFromAnyBranch(t *testing.T) {
 	t.Parallel()
 
 	t.Run("on a feature branch", func(t *testing.T) {
@@ -314,7 +314,12 @@ func TestRunRequiresDefaultBranch(t *testing.T) {
 
 		f := newFixture(t)
 		repo := f.repo("x")
+		// Let the feature branch carry a commit of its own, so "cut from
+		// origin's default" and "cut from wherever we were" are distinguishable.
 		gitCmd(t, repo, "checkout", "-q", "-b", "feature")
+		writeFile(t, filepath.Join(repo, "feature-only.txt"), "wip")
+		gitCmd(t, repo, "add", "-A")
+		gitCmd(t, repo, "commit", "-q", "-m", "feature work")
 		prs := &fakePR{}
 
 		got := run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
@@ -322,13 +327,20 @@ func TestRunRequiresDefaultBranch(t *testing.T) {
 		if got.code != exitOK {
 			t.Errorf("exit code = %d, want %d", got.code, exitOK)
 		}
-		if want := "not on the default branch (on 'feature', want 'main')"; !strings.Contains(got.stdout, want) {
-			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
+		if len(prs.calls) != 1 {
+			t.Fatalf("opened %d PRs, want 1", len(prs.calls))
 		}
-		if len(prs.calls) != 0 {
-			t.Errorf("opened %d PRs, want none", len(prs.calls))
+		// Cut from origin/main, so the feature branch's own work is not
+		// along for the ride.
+		if tree := gitCmd(t, f.bare("x"), "ls-tree", "-r", "--name-only", "b"); strings.Contains(tree, "feature-only.txt") {
+			t.Errorf("pushed tree = %q, want it cut from the default branch", tree)
 		}
-		// Left where it was found -- the reason the check exists.
+		// The PR still targets the default branch, not the branch the repo
+		// happened to be sitting on.
+		if got, want := prs.calls[0].pr.Base, "main"; got != want {
+			t.Errorf("PR base = %q, want %q", got, want)
+		}
+		// And the repo is handed back exactly where it was found.
 		if got := currentBranch(t, repo); got != "feature" {
 			t.Errorf("left on branch %q, want feature", got)
 		}

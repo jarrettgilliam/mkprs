@@ -52,15 +52,14 @@ func (a *app) processRepo(repoPath string, c *capture) (res outcome) {
 		return skip("could not determine default branch")
 	}
 
-	// mkprs cuts its branch from the default branch and checks the default branch
-	// back out when it is done, so it only runs on a repo that started there --
-	// otherwise the cleanup would move the user off their own branch.
+	// Whatever is checked out now is where the repo is put back, so it has to be
+	// recorded before the branch is cut. It is bookkeeping and nothing more: the
+	// working branch comes from resolveBase below, so the starting branch never
+	// contributes to what this run produces. A detached HEAD has no name to
+	// record, which is the one state worth skipping over.
 	head, ok := headBranch(repoPath)
 	if !ok {
 		return skip("not on a branch (detached HEAD)")
-	}
-	if head != defaultBranch {
-		return skip(fmt.Sprintf("not on the default branch (on '%s', want '%s')", head, defaultBranch))
 	}
 
 	if where := branchLocation(repoPath, cfg.branch); where != "" {
@@ -87,7 +86,7 @@ func (a *app) processRepo(repoPath string, c *capture) (res outcome) {
 	// leave -- including the success path, where this runs after the PR is
 	// opened. Two cases opt out, and both mean "leave it alone" rather than
 	// "delete the branch but stay put": cleanup is all or nothing, because
-	// checking out the default branch drags any uncommitted edits along with it.
+	// checking out head drags any uncommitted edits along with it.
 	//
 	// A failure is left exactly as it broke, so nothing is lost to a problem the
 	// user has not seen yet: a failed push means origin has no copy of the
@@ -100,7 +99,7 @@ func (a *app) processRepo(repoPath string, c *capture) (res outcome) {
 		if _, broke := res.(outcomeFailed); broke {
 			return
 		}
-		restoreRepo(repoPath, defaultBranch, cfg.branch, c)
+		restoreRepo(repoPath, head, cfg.branch, c)
 	}()
 
 	cmd := exec.Command(expanded[0], expanded[1:]...)

@@ -40,11 +40,12 @@ a shell -- use ` + "`-- bash -c '...'`" + ` for globs, pipes or redirection. An 
 that is exactly {} becomes the repo's absolute path, also available as $REPO
 along with $REPO_NAME.
 
-Branches are cut from, and PRs opened against, each repo's own default branch. A
-repo is skipped when it is not on that branch, its working tree is dirty, the
-branch already exists, the command leaves no changes behind, or origin is not a
-GitHub remote. The command must leave the repo on the branch mkprs created -- one
-that switches branches fails that repo, leaving its work in place.
+Branches are cut from, and PRs opened against, each repo's own default branch,
+whichever branch the repo happens to be on. A repo is skipped when its HEAD is
+detached, its working tree is dirty, the branch already exists, the command
+leaves no changes behind, or origin is not a GitHub remote. The command must
+leave the repo on the branch mkprs created -- one that switches branches fails
+that repo, leaving its work in place.
 
 A repo that succeeds or is skipped is returned to the branch it started on and
 mkprs's branch is deleted; -k keeps that branch and leaves the repo on it. A repo

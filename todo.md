@@ -13,35 +13,6 @@ Entries are unnumbered so nothing has to be renumbered as they come and go.
 
 ## Scale & operability
 
-- **Start from any branch, and return to it.** Today a repo not on its default
-  branch is skipped (`run.go:58`). That guard exists only because cleanup hard-codes
-  where to go back to — but the working branch is cut from `resolveBase`, i.e.
-  origin's default, so whatever was checked out at the start never contributed to
-  it. The starting branch is bookkeeping, not input.
-
-  Two changes:
-
-  - Drop the `head != defaultBranch` skip. Keep the `!ok` arm above it: a detached
-    HEAD has no branch name to record. (Restoring one by SHA would work, but it is
-    a rare enough state that skipping is the honest answer.)
-  - Pass the recorded `head` to `restoreRepo` instead of `defaultBranch`, renaming
-    its `dflt` parameter accordingly. It is already deferred at the one point where
-    the branch starts existing, so there is no new lifetime to reason about.
-
-  Unchanged, and worth stating so the diff stays small: the clean-tree
-  requirement, `resolveBase(repoPath, defaultBranch)` as the fork point, the PR's
-  base, and the guard that the command must end on mkprs's branch. Deleting only
-  mkprs's own branch already means the starting branch survives to be checked out.
-
-  Also: the `branchLocation` skip already covers a repo sitting on a branch named
-  the same as `cfg.branch`, so restore cannot collide with the branch being deleted.
-
-  Touches the *A repo must start on its default branch* design note below (delete
-  it), `usageTail` in `cli.go` (it lists this among the skip reasons), and
-  `TestRunRequiresDefaultBranch`, which inverts: run from a feature branch, assert
-  the PR still targets the default branch and the repo ends back on the feature
-  branch.
-
 - **`-i, --interactive` review gate.** Pause in each repo after the command has
   run but before anything is staged, committed, pushed or opened, print the
   diffstat, and ask. This is `git add -p` for a batch operation, and it should
@@ -352,11 +323,6 @@ tests, not from having two production implementations.
   the base and the branch's fork point have to agree for the PR's diff to be
   exactly the commit the run made. This holds even when the command supplies its
   own head branch, below.
-- **A repo must start on its default branch, or it is skipped.** mkprs cuts its
-  branch from there and checks it back out during cleanup, so running from a
-  feature branch would silently move the user off their own branch. The skip
-  names both branches; a detached HEAD skips too. *Superseded — see "Start from
-  any branch, and return to it" above; this note goes when that lands.*
 - **The command must leave the repo on the branch mkprs created.** Staging and
   committing act on whatever HEAD points at, so a command that runs
   `git checkout` would have its work committed to a branch mkprs does not own —
@@ -457,8 +423,8 @@ tests, not from having two production implementations.
 
   **Write this last.** Almost every open item above changes something the README
   would have to state: the flags under *Pull requests* and *Scale & operability*
-  each add a line, *Start from any branch* rewrites the skip list, and *Replace
-  `gh`* removes the install prerequisite entirely. Documenting the tool before
+  each add a line, and *Replace `gh`* removes the install prerequisite
+  entirely. Documenting the tool before
   those land means writing prose with a known expiry date. The cost of having no
   README is borne by strangers arriving from GitHub, which is not yet the
   audience; the cost of a stale one is borne by them too, and is worse, because
@@ -481,7 +447,7 @@ tests, not from having two production implementations.
   | `outcome.go` field | `outcomeFailed.c` | `output` |
   | `mkprs.go` field | `app.errw` | `errOut` |
   | `git.go` params | `gitTo(…, w io.Writer)`, `gitErrTo(…, w)`, `fetchOrigin(…, w)`, `restoreRepo(…, w)` | `log` |
-  | `git.go` params | `resolveBase(repoPath, dflt)`, `restoreRepo(repoPath, dflt, …)` | `defaultBranch` |
+  | `git.go` param | `resolveBase(repoPath, dflt)` | `defaultBranch` |
   | `run.go` params | `processRepo(…, c *capture)`, `openPR(…, c *capture)` | `output` |
   | `cli.go` param | `printUsage(w io.Writer, fs *pflag.FlagSet)` | `out`, `flags` |
 
@@ -493,10 +459,6 @@ tests, not from having two production implementations.
 
   `config`'s fields, the `usage*` constants and the `exit*` constants are already
   fine; this is not a sweep of everything short.
-
-  Sequencing: `restoreRepo`'s `dflt` is also touched by *Start from any branch*
-  above, which renames it for a different reason (it stops being the default
-  branch at all). Do that one first and this row disappears.
 
 - **Every git helper takes `repoPath` first**, which is a method receiver
   wearing a disguise. A `repo` type with `r.git(…)` would delete that parameter
