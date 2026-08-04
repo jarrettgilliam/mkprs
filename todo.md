@@ -15,9 +15,128 @@ nothing is numbered, so items can come and go without renumbering.
 Decisions already settled — including the ones about what mkprs deliberately does
 *not* do — live in [`design-notes.md`](design-notes.md) and are not repeated here.
 
+## Priorities
+
+Every item carries a band on the line under its heading. The point is to decide
+the order once, with the whole list in view, rather than re-argue it at the start
+of each session — picking the next item ad hoc reliably favours whatever is most
+interesting that day, which is not the same as whatever is most useful.
+
+The sections below group by subject, not by urgency, and that stays: a flag
+belongs with the other flags whatever it costs. The band is the second axis.
+
+**The rules, in the order they are applied.**
+
+1. **Bugs before features.** Something that behaves wrongly today outranks
+   something that does not exist yet, and it outranks it regardless of size —
+   wrong behaviour is being relied on while it goes unfixed, and every feature
+   built over it inherits the fault. This is why a one-line argument-parsing fix
+   sits above the tool's most valuable feature.
+2. **Prerequisites above what they unblock.** An item another item is waiting on
+   moves up to meet it. Doing them in the other order means building the
+   dependent item twice, or building a workaround that then has to be deleted.
+3. **Value against effort, for everything left.** Cheap and useful first;
+   expensive and marginal last. The two ends are easy; the middle is judgement,
+   and the one line under each heading is where that judgement is recorded so it
+   can be disagreed with.
+4. **Safety nets are worth more than their size suggests.** They are cheap to
+   build and they bound a failure that lands in other people's repositories,
+   which is not a cost this tool gets to absorb quietly.
+5. **Documentation last.** Prose written against a moving tool is prose with an
+   expiry date, and a stale README is worse than none because it is believed.
+
+**The bands.**
+
+- **P1** — bugs, safety nets, and cheap work another item is waiting on.
+  Everything here is small, and none of it should sit behind a feature. This band
+  is meant to stay short and to be emptied.
+- **P2** — the features. Most of the tool's remaining worth is here, and so is
+  most of the remaining work.
+- **P3** — high cost against low reward, plus work deliberately parked. Not
+  "never", but doing any of it ahead of P2 would be a mistake rather than merely
+  early.
+
+**Maintaining the bands.**
+
+Within a band the order is loose — the band is the commitment. Two orderings are
+fixed, and both are stated on the items themselves: `--fail-fast` precedes *Make
+`--verbose` actually verbose*, and the README is written after everything that
+would change what it says.
+
+A band is not permanent. Finishing an item can promote another by clearing its
+prerequisite, and a P3 can move up on evidence — a real repo that needs it, or a
+run that goes wrong in the way it would have prevented. Rebanding is a normal
+edit; leaving a band stale because it was written down once is not the intent.
+
+New items get a band when they are added, while the reasoning is fresh. An item
+with no band is an item nobody has decided about yet.
+
+## Working agreement
+
+*Priorities* settles which item is next. This settles how it gets built, and it
+is binding for the same reason: decided once, in the calm, rather than
+renegotiated in the middle of a feature where every rule looks like an obstacle.
+
+**Red-green TDD.** Write the failing test first, run it, watch it fail, and only
+then write the code that makes it pass. The order carries the whole value, and it
+buys two separate things.
+
+The first is that the test gets tested. A test that has never been seen to fail
+has not been shown to test anything: it may assert on the wrong value, exercise a
+path it does not reach, or pass vacuously because a helper returned early.
+Watching it go red for the reason you predicted is the only evidence that its
+green means something later. This is not hypothetical here — several tests turn
+on git behaving in a particular way, and a test written around a wrong belief
+about git passes both before and after the fix.
+
+The second is that behaviour gets defined before there is an implementation to
+shape it. A test written afterwards describes what the code does; a test written
+first describes what it should do, and the difference shows up exactly where it
+matters, in the edge cases the implementation quietly declined to handle. Most
+items above already contain their own test list — the skip conditions, the table
+rows, the message text — so the definition work is largely done and the tests
+follow it.
+
+**Red has to be red for the right reason.** In Go a test naming a function that
+does not exist yet fails to *compile*, which is not the same as failing, and
+proves nothing about the assertion. Stub the function first — the signature, and
+a body that returns a zero value or panics — so the suite builds and the test
+fails on its assertion, with a message that reads the way it should when the
+feature later breaks. If the failure message would not tell you what went wrong,
+fix it now, while it is on screen.
+
+**One item at a time.** Take a single item, finish it, hand it back. Two items in
+one change cannot be reviewed as either, cannot be reverted separately, and blur
+which test covers which decision. The temptation is always the adjacent fix
+noticed on the way past — the right home for it is a new item here, or a line
+added to the item that already owns it. Where an item explicitly carries a
+separable piece, splitting it is fine and stays within this rule; the
+discarded-`gitError` bug under *Make `--verbose` actually verbose* is the example,
+and it says so.
+
+**Ask rather than assume.** When this file and the source do not settle a
+question, ask it — a guess that turns out wrong is discovered at review, after
+the tests have been written around it. Questions are cheap and the answers are
+durable: each one becomes a line here or a note in
+[`design-notes.md`](design-notes.md), so the same question is asked once rather
+than re-derived by whoever meets it next. Most of the detail in the items above
+started as exactly that.
+
+**Finish by updating this file, then stop.** Delete the completed item — `git log`
+is the record — and fold back anything the work turned up: a decision worth
+keeping goes to [`design-notes.md`](design-notes.md), a follow-up becomes a new
+item with a band, and any item whose prerequisite just cleared gets rebanded.
+Then stop for review.
+
+**Committing is not part of finishing.** Review, commit and push are the author's,
+and they happen between items, not inside them. Leave the work in the tree.
+
 ## Flags & UX
 
 ### `-i, --interactive` review gate
+
+**P3** — the largest item here, and `--list`, `--fail-fast` and `--update` each
+deliver a piece of its value far more cheaply.
 
 Pause in each repo after the command has run but before anything is staged,
 committed, pushed or opened, print the diffstat, and ask. This is `git add -p`
@@ -104,6 +223,9 @@ replace "fail and move on" with "block forever", which is the failure that flag
 exists to prevent.
 
 ### `--update` to add to an existing branch and PR
+
+**P2** — the band's highest value and its largest change; nothing is waiting on
+it, so it follows the P1 items rather than leading them.
 
 Once a run has opened its pull requests, mkprs cannot touch them again: the
 branch now exists, so `preflight` skips every repo with `branch '<b>' already
@@ -292,12 +414,18 @@ throttled one.
 
 ### `--list` to preview the repo set
 
+**P2, first of the band** — best value per line left: a flag, an early return and
+a loop over facts `preflight` already computes.
+
 Print which repos pass the filters (GitHub remote, clean tree, branch free) and
 exit without running anything. Cheap, and it covers the "what would this touch?"
 half of the old `--dry-run` that `-i` does not, since `-i` still runs the command
 before it asks.
 
 ### `--fail-fast` to stop at the first failure
+
+**P1** — a flag and a `break`, and *Make `--verbose` actually verbose* depends on
+it landing first.
 
 The main loop always continues after a failure. When the first repo fails because
 the command itself is wrong, you want to stop and fix it rather than watch 29
@@ -312,6 +440,10 @@ the fix for that, rather than teaching verbose to replay; see *Make `--verbose`
 actually verbose*.
 
 ### Make `--verbose` actually verbose
+
+**P2, after `--fail-fast`** — wide, shallow work at every git call site; the
+discarded-`gitError` bullet below is a plain bug, is P1, and can be lifted out
+and done alone.
 
 Today it streams one thing — the user's command's two streams, prefixed
 `[repo]` — and nothing else. Everything mkprs itself does is either suppressed or
@@ -393,6 +525,9 @@ lines land in one place.
 
 ### `--tracked-only` staging
 
+**P2, last of the band** — smallest feature left, `-A` against `-u` behind a
+bool, but it guards a case that has not actually come up yet.
+
 `git add -A` stages everything the command left behind, including new files. That
 is the right default (tools like `dotnet outdated -u` and scaffolders create
 files), but a command that drops build artifacts in a repo with a thin
@@ -407,6 +542,9 @@ they did not know it would. Opt-out, not opt-in.
 
 ### Per-repo command timeout, defaulting to 10 minutes
 
+**P1** — one `exec.CommandContext` in `runCommand`, against a run that otherwise
+stalls forever with no output.
+
 One hung command stalls the whole run with no feedback, and serial execution
 means it stalls every repo behind it. Run under `exec.CommandContext` with
 `context.WithTimeout`; expiry is a normal per-repo failure (`command timed out
@@ -419,6 +557,9 @@ the same afternoon; tune it once there is evidence, but do not ship it unset.
 
 ### `--max-repos` safety limit, defaulting to 50
 
+**P1** — one comparison plus a message, and the only thing between a mistyped
+target and 200 pull requests in other people's repos.
+
 Easy to point this at `~/repos` and accidentally open 200 PRs. Hard-fail before
 any repo is touched if discovery returns more than the cap, and make the message
 the fix: `found 84 repositories, above the --max-repos limit of 50; re-run with
@@ -430,6 +571,9 @@ when the large run is intentional, never silent when it is not. Count after
 does not spend two of the budget.
 
 ### Stop discovery depth search at the first repo found
+
+**P1** — a bug that silently inflates the repo set, and the discovery speedup,
+in the same small change.
 
 Today pruning stops descent into the `.git` directory itself, not into the rest
 of the tree, so a repo nested inside another repo is discovered and both are
@@ -471,6 +615,9 @@ Reduces the pressure behind `--max-repos` but does not remove it: forty sibling
 repos under one target is still forty pull requests.
 
 ## Replace `gh` with direct GitHub API calls
+
+**P2** — high work and high reward: it drops the last external binary, and the
+README's install section is waiting on it.
 
 `gh` is the last external binary mkprs needs, which undercuts the reason it was
 written in Go: download one file and run it, on any platform. A user without the
@@ -563,6 +710,9 @@ tests, not from having two production implementations.
 
 ### There is no `README.md`
 
+**P3, and last of everything** — almost every open item changes what it would
+say; see *Write this last* below.
+
 The repo has `LICENSE`, `go.mod`, `go.sum`, `main.go`, `internal/` and two
 markdown files — someone landing on it from GitHub gets no idea what mkprs is,
 and `todo.md` is the closest thing to documentation, which reads as a backlog
@@ -602,6 +752,9 @@ is worse, because it is believed.
 
 ### Spell out names that outlive their line
 
+**P3** — readability only, and cheapest done after the items that are about to
+rewrite these same signatures.
+
 Single letters are fine for a local whose declaration is visible from its use.
 They are not fine for struct fields, package-level declarations, or parameters,
 where the reader meets the name far from anything that explains it. A good name
@@ -633,12 +786,17 @@ fine; this is not a sweep of everything short.
 
 ### A `repo` type for the git helpers
 
+**P3** — parked by its own last sentence: high work, and only worth it if
+`git.go` grows again.
+
 Every git helper takes `repoPath` first, which is a method receiver wearing a
 disguise. A `repo` type with `r.git(…)` would delete that parameter from fifteen
 signatures in `git.go` alone. Attractive, and much larger than it looks — worth
 doing only if the file grows again.
 
 ### Trailing-flag robustness
+
+**P1** — a real misparse with a one-check fix, and the smallest item in the file.
 
 `mkprs tgt -b -- true` silently takes `--` as the branch name, then fails with
 "no command specified" because the terminator was consumed. pflag has no
