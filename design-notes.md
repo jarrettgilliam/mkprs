@@ -51,6 +51,39 @@ if it landed on the default branch, pushed straight to `main`. Any switch, and a
 detached HEAD, fails that repo — and since a failure is not cleaned up,
 everything it created survives, mkprs's own branch included.
 
+## mkprs never moves a branch to a commit it did not create
+
+No `pull`, `merge`, `rebase` or `reset` appears anywhere in `internal/mkprs`, and
+none should. The git verbs in use are `fetch`, `checkout`, `add`, `commit`,
+`push`, `branch`, and the read-only ones — `rev-parse`, `rev-list`,
+`symbolic-ref`, `status`, `config`, `remote`, `diff`.
+
+`fetchOrigin` runs `fetch origin --quiet --prune` and stops there. `resolveBase`
+then prefers `origin/<default>` over the local branch of the same name, so a run
+cuts from what origin actually has by reading *around* a stale local `main`
+rather than updating it. Every other question — `branchLocation`, `branchAhead`,
+`getDefaultBranch` — is answered by reading refs.
+
+The consequence is worth stating plainly: **a user's local `main` can be
+arbitrarily far behind and it neither matters nor changes.** The only branch mkprs
+moves is its own, and only by committing to it. Advancing a branch with a new
+commit is not repositioning it.
+
+Repositioning is what is off the table, because it destroys silently.
+`reset --hard`, or `checkout -B` against a branch that already exists, discards
+whatever the old tip pointed at with no record and no prompt — and on a branch
+the user made rather than mkprs, that can be unpushed work. A tool that touches
+forty repos unattended cannot make that call in any of them.
+
+This is load-bearing rather than incidental. `--update` decides whether to touch
+a repo by asking this and nothing else: it proceeds exactly when the branch it
+needs is already on the commit the work starts from, or does not exist locally at
+all, and skips whenever continuing would mean repositioning a ref. That is why
+its checks are equality rather than ancestry — a branch merely *behind* where the
+work begins holds nothing unique and looks safe to advance, but advancing it
+still needs `checkout -B`, which is the first crack in the invariant. The manual
+`reset --hard` in the handful of affected repos is the better price.
+
 ## A failed repo is not cleaned up at all
 
 Cleanup is all or nothing: the checkout back to the default branch is what makes

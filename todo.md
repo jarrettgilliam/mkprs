@@ -103,6 +103,193 @@ re-running is what makes you read the number. Prompting on a timeout would
 replace "fail and move on" with "block forever", which is the failure that flag
 exists to prevent.
 
+### `--update` to add to an existing branch and PR
+
+Once a run has opened its pull requests, mkprs cannot touch them again: the
+branch now exists, so `preflight` skips every repo with `branch '<b>' already
+exists on origin`. That reads like a guardrail but is the tool declining to help
+— the forgotten file, the second cleanup pass, the fix that occurs to you after
+review all have to be done by hand across thirty repos, which is the work mkprs
+exists to remove.
+
+`--update` means **create or update**: adopt the branch where it exists, create
+it where it does not. A repo that was dirty on the first run and has since been
+tidied gets picked up by the same re-run that adds a commit everywhere else,
+rather than needing a separate invocation.
+
+This is not the *"I did manual work, just open the PR"* mode in
+[`design-notes.md`](design-notes.md), which was dropped because manual edits do
+not scale to forty repos. This still runs the command in every repo, so it scales
+exactly as well as the primary use case.
+
+**Never implicit.** The flag is the whole safety story — silently adopting
+whatever branch happened to match the name is the trap that note warns about.
+
+#### Refuse the default branch, before any repo is touched
+
+mkprs currently only ever writes to branches it created, and that is doing more
+work than it looks: `mkprs ~/repos -b main -- <cmd>` is harmless today only
+because every repo skips on "branch already exists". Under `--update` the same
+typo would commit and push to `main` across the fleet.
+
+This is a startup error, the way an uninterpretable target is — not a per-repo
+skip, and not part of the table below, which would happily say "continue" for it.
+
+#### When to continue
+
+Pure git, no query to GitHub. Local and remote here mean `refs/heads/<branch>`
+and `refs/remotes/origin/<branch>` after `preflight`'s existing
+`fetch --prune`:
+
+| Local | Remote | On the same commit as | Continue? |
+|---|---|---|---|
+| Y | Y | each other | **Yes** — `checkout <branch>`, commit, update the PR |
+| Y | Y | — differ | **No** — skip |
+| Y | N | the default branch | **Yes** — `checkout <branch>`, commit, open a PR |
+| Y | N | — differ | **No** — skip |
+| N | Y | n/a | **Yes** — create the local branch from origin's |
+| N | N | n/a | **Yes** — create it from the default branch, as today |
+
+**Every "yes" needs no ref moved; every "no" would.** That is the whole rule, and
+it is *mkprs never moves a branch to a commit it did not create* in
+[`design-notes.md`](design-notes.md) applied one row at a time. Rows 1 and 3 are
+already sitting on the commit the work starts from, so a plain `git checkout` is
+enough and the branch only ever advances by mkprs's own commit. Rows 5 and 6
+*create* a local branch, which is not a move. Rows 2 and 4 would need
+`checkout -B` to drag an existing branch somewhere else, and that is the line.
+
+The equality tests are therefore exact, not conservative approximations. A branch
+sitting three commits behind the default branch holds nothing unique and looks
+harmless, but reaching the starting commit still means repositioning it — so it
+belongs in row 4 with everything else that would have to move. Widening rows 1
+and 3 to "is an ancestor of" would quietly reintroduce exactly the `-B` this
+table exists to avoid.
+
+Rows 5 and 6 are the common path: mkprs deletes its own local branch on success,
+so the state after a normal run is *local absent*. The rows with a local branch
+present arise only after `--keep-branch`, a failure, or a hand-made branch.
+
+**Row 2 also covers "local strictly behind remote"**, which is provably safe to
+fast-forward and is skipped anyway, for the reason above. The manual `reset
+--hard` in the few affected repos is the price of keeping the rule whole. Never
+force-push, by the same logic: a reviewer's suggestion committed through the
+GitHub UI must not be overwritten.
+
+**Row 4 protects unpushed work as a side effect.** The commits there might be a
+squash-merged PR whose branch GitHub then deleted, or genuine local work that was
+never pushed — and git cannot tell the two apart, because squashing rewrites the
+SHAs. Only the PR's state distinguishes them, and asking for it would mean
+`prOpener` reporting state rather than a URL. It never has to: the repo is
+already skipped for needing a ref moved, so the harder question is one the table
+never asks.
+
+Both skips name the branch and say what would unblock them — delete it, or push
+it — since the repo is otherwise silently absent from a run the user expected it
+in.
+
+**What the table gives up**, knowingly: a PR that was squash-merged in a repo
+that does *not* auto-delete the branch. Local and remote still agree, so row 1
+continues and the new PR re-proposes the already-merged commits alongside the new
+one. That is a visibly wrong PR rather than destroyed work, it is caught in
+review, and closing it costs nothing.
+
+**`branchLocation` cannot answer this**, despite looking like it does. It returns
+`"locally"` as soon as the local ref exists and never looks at origin, so rows 1,
+3 and 5 are indistinguishable through it. The table needs local and remote
+presence as independent facts plus a rev comparison — a new helper, with
+`branchLocation` left alone for the cleanup rule below, which only needs the bit
+it already reports.
+
+#### Where the branch starts from, by row
+
+`processRepo` checks out `-b <branch> <base>` unconditionally today, and under
+`--update` that stops being one thing:
+
+- **Rows 1 and 3** — `checkout <branch>`. It exists locally and is already on the
+  commit the work starts from; moving it is what the table forbids.
+- **Row 5** — create it from `origin/<branch>`, continuing the pushed branch.
+- **Row 6** — create it from `origin/<default>`, exactly as today.
+
+So `prep.base` becomes row-dependent rather than always `resolveBase`'s answer,
+and this is the main structural change `--update` makes to `processRepo`.
+
+#### Comparing against pre-command HEAD, not against base
+
+`branchAhead` measures the branch against `origin/<default>`, which on a
+follow-up run is already true from last time — so a command that changed nothing
+would push and report success on a no-op.
+
+Compare against **HEAD as it stood when the command started** instead. On a fresh
+run the branch is cut from base, so the two are identical and nothing changes;
+this is a generalization rather than a second path, and it makes the existing
+"command made no changes" skip more precise on its own terms.
+
+#### Cleanup restores the branches the repo had
+
+The rule is not "delete the branch mkprs created" but **leave the repo with the
+local branches it started with** — which is the same rule, stated so it covers
+both modes. A branch that existed only on origin is checked out to do the work
+and deleted afterwards; a branch that was already checked out locally stays.
+
+`branchLocation`'s existing answer is enough here — cleanup only needs to know
+whether the branch was local when the run arrived, which is exactly the bit it
+already reports. (The table above needs more than that; see the note under it.)
+
+Safe on every path: success pushed the commit, a skip pushed nothing but origin's
+copy predates the run, and a failure never reaches cleanup at all.
+
+**This makes `-k` a no-op whenever the branch already existed locally**, which is
+every row 1 and row 3 run. The branch is kept because it was there to begin with,
+not because `--keep-branch` was passed, so the flag only means something on rows
+5 and 6 where mkprs created the branch itself. Worth saying out loud: after one
+`-k` run, or a manual checkout, the flag stops doing anything in that repo.
+
+It also files down an existing rough edge. `-k` leaves the repo standing *on* the
+branch, so a later run has `startBranch == branch`; `restoreRepo` would then
+no-op the checkout and try to `git branch -D` the branch it is standing on, which
+git refuses. That failure is invisible today because `gitErrTo`'s error is
+discarded. Under this rule the delete is never attempted.
+
+#### Opening versus updating the pull request
+
+`openPR` has to become create-or-return-existing — that much, and no more.
+`prOpener` keeps returning a URL; the table above deliberately avoids needing PR
+*state*, so the interface does not grow a field.
+
+`gh pr create` fails when a PR exists for the head branch, and today that
+surfaces as a plain repo failure even though the push succeeded — so it needs
+`gh pr view --json url` as a fallback. The `422` handling sketched under *API
+notes* is the cleaner version of the same thing, so this gets simpler after
+*Replace `gh`* lands, but it does not have to wait for it.
+
+**Leave the title and body alone.** The PR describes the whole effort and each
+commit describes its increment, so there is nothing to restate — and a title
+edited by a human during review must not be overwritten by one derived from
+whatever command this run happened to pass. `--message` already applies per run,
+so each update commit gets its own command-derived message for free. `--draft`
+and `-r` apply on the create path and have nothing to act on when updating; say
+so rather than silently ignoring them.
+
+**Report the two apart**, which costs one field. `outcomeSuccess` holds only
+`prURL` and `outcome.go` hardcodes `"PR created"`, so this is an `updated bool`,
+a branch on that one string, and a second constructor beside `success`. Keep the
+three summary counters: `Succeeded` is true of both, and the per-repo lines
+already carry the distinction. If the new-PR count is wanted at a glance,
+`Succeeded: 20 (12 created, 8 updated)` is the form that still sums to the repo
+count.
+
+**A missing PR is opened on the way past, but only if this run commits
+something.** If an earlier run pushed and then failed at `gh` — no auth, a 403 —
+origin has the branch and no PR exists. That is row 5, and create-or-return
+opens the missing one. It is not a repair mode: `-- true` would reach the
+pre-command HEAD check first and skip as "command made no changes", so nothing
+gets opened without a real change to make. Requiring a command stays, and
+allowing one to be omitted stays rejected — the PR title derives from the command
+text, so there would be nothing to name the PR with. The real fixes for this
+state are in *Replace `gh`*: fetching the token early kills the unauthenticated
+case before any repo is touched, and backing off on `403` and `5xx` kills the
+throttled one.
+
 ### `--list` to preview the repo set
 
 Print which repos pass the filters (GitHub remote, clean tree, branch free) and
