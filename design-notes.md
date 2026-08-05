@@ -98,7 +98,7 @@ everything it created survives, mkprs's own branch included.
 No `pull`, `merge`, `rebase` or `reset` appears anywhere in `internal/mkprs`, and
 none should. The git verbs in use are `fetch`, `checkout`, `add`, `commit`,
 `push`, `branch`, and the read-only ones — `rev-parse`, `rev-list`,
-`symbolic-ref`, `status`, `config`, `remote`, `diff`.
+`symbolic-ref`, `status`, `config`, `diff`, `check-ref-format`.
 
 `fetchOrigin` runs `fetch origin --quiet --prune` and stops there. `resolveBase`
 then prefers `origin/<default>` over the local branch of the same name, so a run

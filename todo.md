@@ -30,8 +30,9 @@ belongs with the other flags whatever it costs. The band is the second axis.
 1. **Bugs before features.** Something that behaves wrongly today outranks
    something that does not exist yet, and it outranks it regardless of size —
    wrong behaviour is being relied on while it goes unfixed, and every feature
-   built over it inherits the fault. This is why a one-line argument-parsing fix
-   sits above the tool's most valuable feature.
+   built over it inherits the fault. This is why the discarded-`gitError` bullet
+   — one bullet inside a P2 item — carries P1 of its own and gets lifted out
+   ahead of the feature it is written under.
 2. **Prerequisites above what they unblock.** An item another item is waiting on
    moves up to meet it. Doing them in the other order means building the
    dependent item twice, or building a workaround that then has to be deleted.
@@ -58,10 +59,9 @@ belongs with the other flags whatever it costs. The band is the second axis.
 
 **Maintaining the bands.**
 
-Within a band the order is loose — the band is the commitment. Two orderings are
-fixed, and both are stated on the items themselves: `--fail-fast` precedes *Make
-`--verbose` actually verbose*, and the README is written after everything that
-would change what it says.
+Within a band the order is loose by default — the band is the commitment. Where
+an item's position *is* fixed it says so on its own band line, and nowhere else.
+Anything without such a note is loose within its band.
 
 A band is not permanent. Finishing an item can promote another by clearing its
 prerequisite, and a P3 can move up on evidence — a real repo that needs it, or a
@@ -366,11 +366,14 @@ not because `--keep-branch` was passed, so the flag only means something on rows
 5 and 6 where mkprs created the branch itself. Worth saying out loud: after one
 `-k` run, or a manual checkout, the flag stops doing anything in that repo.
 
-It also files down an existing rough edge. `-k` leaves the repo standing *on* the
-branch, so a later run has `startBranch == branch`; `restoreRepo` would then
-no-op the checkout and try to `git branch -D` the branch it is standing on, which
-git refuses. That failure is invisible today because `gitErrTo`'s error is
-discarded. Under this rule the delete is never attempted.
+It also forecloses a hazard `--update` would otherwise introduce. `-k` leaves the
+repo standing *on* the branch, so a later run has `startBranch == branch`;
+`restoreRepo` would then no-op the checkout and try to `git branch -D` the branch
+it is standing on, which git refuses — and the refusal would go unseen, since
+`gitErrTo`'s error is discarded. That state is unreachable today only because
+`preflight` skips the repo before it gets there ("branch already exists
+locally"); `--update` is exactly the change that stops skipping it. Under this
+rule the delete is never attempted.
 
 #### Opening versus updating the pull request
 
@@ -669,10 +672,9 @@ tests, not from having two production implementations.
 **P3, and last of everything** — almost every open item changes what it would
 say; see *Write this last* below.
 
-The repo has `LICENSE`, `go.mod`, `go.sum`, `main.go`, `internal/` and two
-markdown files — someone landing on it from GitHub gets no idea what mkprs is,
-and `todo.md` is the closest thing to documentation, which reads as a backlog
-rather than an introduction.
+The repo has no README.md file. Someone landing on it from GitHub gets no idea
+what mkprs is, and `todo.md` is the closest thing to documentation, which reads
+as a backlog rather than an introduction.
 
 Worth covering, roughly in this order:
 
