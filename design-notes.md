@@ -21,6 +21,26 @@ Worse, `dedupeRepos` keys on path, so a worktree of an already-discovered repo
 would not dedupe: two entries, two branches, two pull requests against the same
 GitHub repo.
 
+## A repo inside another repo is not discovered
+
+`discoverRepos` prunes a repo's whole subtree once it finds one, so `~/Code`
+yields 76 repos rather than 87 — the 11 sitting inside `CSharp/TestProjects`
+collapse to the one that contains them.
+
+Git discourages the arrangement to begin with: the inner repo has to be
+`.gitignore`d by hand, and submodules exist for the deliberate case. So one found
+by accident is a stray checkout far more often than something anyone wants a pull
+request against, and the old behaviour meant a tree could hold many more repos
+than it appeared to — which is a batch tool opening pull requests you did not
+know were in scope.
+
+**Naming the inner repo directly still works** and is not an error, so nothing is
+actually unreachable. It is then the walk's own root, so nothing has pruned it.
+
+The pruning is also the discovery speedup, and the larger half of it in practice:
+without it every repo's full working tree is walked looking for more `.git`
+directories — `node_modules`, `bin/obj`, `.venv`, all of it — on every run.
+
 ## No flag takes `--` as its value
 
 pflag takes whatever follows a flag as its value, with no guard of its own, so
@@ -34,8 +54,9 @@ whose value is exactly `--`, naming the flag instead.
 test would reach past the mistake into the values themselves. `-m`, `-t` and `-B`
 are free text, so `-m '-- and then some'` has to keep working; a guard about
 argument structure has no business editing what a commit message may say. What
-the narrow rule gives up is caught downstream anyway: a branch named `--draft`
-fails at `git checkout`, loudly and in every repo.
+the narrow rule gives up is caught anyway, and earlier than it used to be:
+`validateBranchName` rejects a branch named `--draft` at startup, before any repo
+is walked.
 
 The cost is that `-m --` is now unspellable, with no escape hatch: pflag records
 only a flag's final value, so `-m --` and `-m=--` are indistinguishable

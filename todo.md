@@ -570,50 +570,6 @@ when the large run is intentional, never silent when it is not. Count after
 `dedupeRepos`, which `run` already applies, so a repo reached from two targets
 does not spend two of the budget.
 
-### Stop discovery depth search at the first repo found
-
-**P1** — a bug that silently inflates the repo set, and the discovery speedup,
-in the same small change.
-
-Today pruning stops descent into the `.git` directory itself, not into the rest
-of the tree, so a repo nested inside another repo is discovered and both are
-processed. Verified against `~/Code`, where `CSharp/TestProjects` is a repo
-containing 10 nested repos and all 11 are returned — a tree can contain far more
-repos than it appears to.
-
-Git itself discourages the arrangement: the inner repo has to be `.gitignore`d
-by hand, and submodules exist for the case. So a nested repo found by accident
-is more likely a stray checkout than something anyone wants a pull request
-against. Prune the whole repo subtree instead: when a directory holds a `.git`
-directory, record it and `fs.SkipDir` the directory rather than the `.git`.
-
-Naming one directly still works, and is not an error — `mkprs outer
-outer/vendor/inner` processes both. That already falls out of the current
-structure: an inner repo passed as a target is found by the walk as its own
-root, so the "target is inside repository" check never runs for it. Worth a
-test pinning it, since it is the half of the behaviour that is easy to lose
-while implementing the other half.
-
-The `.git`-file check stays as-is, or submodules and linked worktrees start being
-walked into — see *Submodules and linked worktrees are both excluded from
-discovery* in [`design-notes.md`](design-notes.md).
-
-Independently of nesting, this is the discovery speedup: today every repo's
-full working tree is walked looking for more `.git` directories, which means
-`node_modules`, `bin/obj`, `.venv`, all of it. Pruning at the root reads one
-directory per repo instead. On a tree like `~/Code` that is likely the larger
-cost, and it is paid on every run.
-
-Detection has to be a stat of `<dir>/.git` on entering each directory, not a
-check of the `.git` entry itself: `fs.SkipDir` returned from a directory skips
-*that* directory's contents, so returning it from `.git` cannot prune the
-parent. Use `os.Lstat` rather than `os.Stat` — `d.IsDir()` on a `DirEntry` does
-not follow symlinks, so a symlinked `.git` is excluded today and `os.Stat`
-would quietly start including it.
-
-Reduces the pressure behind `--max-repos` but does not remove it: forty sibling
-repos under one target is still forty pull requests.
-
 ## Replace `gh` with direct GitHub API calls
 
 **P2** — high work and high reward: it drops the last external binary, and the

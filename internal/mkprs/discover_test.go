@@ -30,10 +30,11 @@ func TestDiscoverRepos(t *testing.T) {
 		assertEqualSlice(t, "repos", mustDiscover(t, f.targets, nil), []string{a, b})
 	})
 
-	// Pruning stops descent into .git itself, not into the rest of the tree, so
-	// a repo inside another repo is found and both are processed. This is
-	// load-bearing: it is the argument for a future --max-repos.
-	t.Run("finds repos nested inside repos", func(t *testing.T) {
+	// A repo found *inside* another repo is a stray checkout far more often than
+	// something anyone wants a pull request against -- git makes the arrangement
+	// awkward on purpose, and submodules exist for the deliberate case. So the
+	// whole repo subtree is pruned, not just its .git.
+	t.Run("prunes repos nested inside repos", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
@@ -41,20 +42,39 @@ func TestDiscoverRepos(t *testing.T) {
 		inner := filepath.Join(outer, "vendor", "inner")
 		gitCmd(t, "", "init", "-q", "-b", "main", inner)
 
-		assertEqualSlice(t, "repos", mustDiscover(t, f.targets, nil), []string{outer, inner})
+		assertEqualSlice(t, "repos", mustDiscover(t, f.targets, nil), []string{outer})
 	})
 
-	// A submodule's .git is a *file* holding a gitdir: pointer, so it is not a
-	// repository for our purposes. Dropping the IsDir check would silently
-	// start walking into submodules.
-	t.Run("ignores a .git file", func(t *testing.T) {
+	// The other half of pruning, and the half that is easy to lose while
+	// implementing the first: a nested repo named directly is still processed.
+	// It is found as the walk's own root, so nothing has pruned it and the
+	// inside-a-repo check never runs for it.
+	t.Run("a nested repo named directly is still found", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
 		outer := f.repo("outer")
-		writeFile(t, filepath.Join(outer, "sub", ".git"), "gitdir: ../.git/modules/sub\n")
+		inner := filepath.Join(outer, "vendor", "inner")
+		gitCmd(t, "", "init", "-q", "-b", "main", inner)
 
-		assertEqualSlice(t, "repos", mustDiscover(t, f.targets, nil), []string{outer})
+		repos := mustDiscover(t, outer, nil)
+		repos = mustDiscover(t, inner, repos)
+		assertEqualSlice(t, "repos", repos, []string{outer, inner})
+	})
+
+	// A submodule's .git, and a linked worktree's, are each a *file* holding a
+	// gitdir: pointer, so neither is a repository for our purposes. The fixture
+	// sits beside the repos rather than inside one, since inside one it would be
+	// pruned before this check could be reached and the test would pass whatever
+	// the check did.
+	t.Run("ignores a .git file", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("alpha")
+		writeFile(t, filepath.Join(f.targets, "worktree", ".git"), "gitdir: /elsewhere/.git/worktrees/wt\n")
+
+		assertEqualSlice(t, "repos", mustDiscover(t, f.targets, nil), []string{repo})
 	})
 
 	t.Run("appends across multiple target dirs", func(t *testing.T) {
