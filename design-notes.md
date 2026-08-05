@@ -23,9 +23,9 @@ GitHub repo.
 
 ## A repo inside another repo is not discovered
 
-`discoverRepos` prunes a repo's whole subtree once it finds one, so `~/Code`
-yields 76 repos rather than 87 — the 11 sitting inside `CSharp/TestProjects`
-collapse to the one that contains them.
+`discoverRepos` prunes a repo's whole subtree once it finds one, so a target
+yields only the outermost repos under it — a repo holding eleven scratch
+checkouts of its own counts once, not twelve.
 
 Git discourages the arrangement to begin with: the inner repo has to be
 `.gitignore`d by hand, and submodules exist for the deliberate case. So one found

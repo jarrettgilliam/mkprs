@@ -140,17 +140,31 @@ deliver a piece of its value far more cheaply.
 
 Pause in each repo after the command has run but before anything is staged,
 committed, pushed or opened, print the diffstat, and ask. This is `git add -p`
-for a batch operation, and it should borrow that key vocabulary rather than
-invent one:
+for a batch operation, so it takes that prompt's keys where they carry over
+rather than inventing a set from scratch:
 
-| key | meaning |
-|---|---|
-| `y` | commit this repo and open its PR |
-| `n` | skip this repo, discarding the changes |
-| `d` | show the full diff, then ask again |
-| `s` | drop into a shell in the repo; on exit, re-read the diff and ask again |
-| `a` | accept this and every remaining repo — stop asking |
-| `q` | abort the run; this repo and the rest are left untouched |
+| key | meaning | in `git add -p` |
+|---|---|---|
+| `y` | commit this repo and open its PR | stage this hunk |
+| `n` | skip this repo, discarding the changes | do not stage this hunk |
+| `p` | show the full diff, then ask again | print the current hunk |
+| `e` | drop into a shell in the repo; on exit, re-read the diff and ask again | manually edit the current hunk |
+| `a` | accept this and every remaining repo — stop asking | stage this hunk and all later ones in the file |
+| `q` | abort the run; this repo and the rest are left untouched | quit |
+
+Every key carries its `git add -p` sense, widened from a hunk to a repo. `e` is
+the one that stretches furthest — a shell rather than an editor — but it is
+git's slot for hand-intervention, which is exactly what this is. `a` is the
+other stretch: git's stops at the end of the current file, and there is no mkprs
+equivalent of "this file", so it means the rest of the run.
+
+**`d` and `s` stay unbound**, rather than being given mkprs meanings that fight
+their git ones. Git's `d` — skip this hunk and every later one *in this file* —
+has no repo-scoped equivalent that is not already `q`, and `s` splits a hunk,
+which does not arise here. Both are likely presses from muscle memory, so answer
+them with a pointer (`d` → "`n` skips this repo, `q` stops the run") rather than
+re-prompting silently. Print the key list before the first prompt, not just on
+`?`, so the meanings are on screen when they are needed.
 
 Notes that matter for the implementation:
 
@@ -171,7 +185,7 @@ Notes that matter for the implementation:
   stop the loop cleanly, letting the current repo's cleanup run.
 - Skips are reported as normal (`⏭️`), so the summary still adds up.
 
-#### `s` — drop into a shell in the repo
+#### `e` — drop into a shell in the repo
 
 The payoff of the whole feature. A codemod that handles 90% of repos leaves a
 handful needing a human, and today that means aborting the run, fixing one repo
@@ -179,8 +193,11 @@ by hand, and starting over. This turns those into a detour: land in the repo on
 the working branch, fix it, `exit`, carry on.
 
 - **Launch `$SHELL`**, falling back to `/bin/sh`. On Windows `$SHELL` is
-  normally unset, so fall back to `%COMSPEC%` (or `powershell`) — the tool
-  builds and is smoke-tested there, so this cannot be POSIX-only.
+  normally unset, so fall back to `%COMSPEC%` (or `powershell`). The test suite
+  is written to run there — `smoke_test.go` appends `.exe`, and the fixtures
+  avoid `bash -c` for exactly this reason — so this cannot be POSIX-only.
+  (Nothing actually runs it on Windows today: there is no CI, so "Windows works"
+  is a design constraint here, not a measured fact.)
 - **Working directory is the repo root**, matching where the command ran.
 - **Pass the real terminal through** — `os.Stdin`, `os.Stdout`, `os.Stderr`
   directly. This is the deliberate exception to how everything else runs:
@@ -201,7 +218,7 @@ the working branch, fix it, `exit`, carry on.
 **Hand-typed `git commit` is already handled.** It used to be read as "no
 changes" and have its branch deleted; `processRepo` now decides via `branchAhead`
 (`git rev-list --count <base>..<branch>`) instead of the index, so a commit counts
-no matter who made it. Nothing extra is needed for `s` beyond re-reading the diff.
+no matter who made it. Nothing extra is needed for `e` beyond re-reading the diff.
 
 **`git checkout` inside the shell fails the repo**, by the same rule that applies
 to the command itself — and the shell is exactly where someone would reach for
@@ -500,7 +517,9 @@ from the output it is narrating:
 [acme-web] Analyzing acme-web.csproj...
 ```
 
-The `$` marker borrows `set -x`, which is the same idea and already familiar.
+The `$` marker is the shell-prompt convention for "this is the command, not its
+output" — the same idea as `set -x`, though not the same character: `set -x`
+prefixes with `PS4`, which is `+ ` by default.
 Echo before running, not after, so a hang is attributable to the line above it.
 
 **Trace lines go straight to `c.out`, never into `c.buf`.** The buffer is what a
@@ -593,7 +612,12 @@ they need no rewriting either. `ghCLI` then goes — see *Migration* below.
 **Discover a token in this order**, first hit wins:
 
 1. `GH_TOKEN`, then `GITHUB_TOKEN`. The CI convention, and what `gh` itself reads
-   first. Actions provides `GITHUB_TOKEN` automatically.
+   first. Actions mints a token per job, but does *not* put it in the
+   environment: it is reachable as `${{ github.token }}` / `secrets.GITHUB_TOKEN`
+   and the workflow has to map it (`env: GH_TOKEN: ${{ github.token }}`), the
+   same line `gh` asks for. Worth stating wherever this gets documented — under
+   Actions, an unmapped token means source 1 finds nothing and source 2 finds an
+   unauthenticated `gh`.
 2. `gh auth token` (and `gh auth token --hostname <host>` for Enterprise), if
    `gh` is on `PATH`. This inherits gh's keyring/`hosts.yml` without
    reimplementing it, so existing users need no setup — but is a convenience,
@@ -603,6 +627,20 @@ they need no rewriting either. `ghCLI` then goes — see *Migration* below.
    (osxkeychain, wincred, libsecret) that the user's `git push` already relies on.
 4. Otherwise fail with an actionable message naming all three options, rather
    than a bare 401.
+
+**First hit wins even when the API rejects it**, and that is the design rather
+than an oversight: falling through to the next source on a 401 would mean a
+stale `GH_TOKEN` silently deferring to a `gh` login with different permissions,
+so which identity opened a PR would depend on which credential happened to be
+expired. One source, chosen up front, is the version a user can reason about.
+
+The cost is that a rejected token looks like a bare "bad credentials" with three
+plausible culprits, so **the token's source is carried alongside it and named in
+every auth failure** — `token from $GH_TOKEN was rejected (401); unset it to
+fall back to 'gh auth token'`. That is one string field beside the token and one
+line in the error, and it is the difference between a fixable message and an
+afternoon. Name the source in the "no token found" case too, by listing what was
+tried in the order it was tried.
 
 **The token authenticates the API, not `git push`.** This is the sharp edge and
 belongs in the docs. mkprs pushes via `git push`, which uses whatever transport
@@ -635,13 +673,19 @@ reads the *un-rewritten* config value, which is what makes this parseable.
   Response `.html_url` is the line mkprs prints today.
 - Reviewers are a **second** call —
   `POST /repos/{owner}/{repo}/pulls/{number}/requested_reviewers` — and labels
-  and assignees a third, via the issues API. `gh pr create` hides this behind one
-  invocation, so the extra PR fields above get more involved here, and partial
-  failure becomes possible: the PR exists but the reviewer was not added. Prefer
-  reporting success with a warning over failing the repo.
+  and assignees are a **third and a fourth**, on separate issues-API endpoints
+  (`POST /repos/{owner}/{repo}/issues/{number}/labels` and `…/assignees`), which
+  is one more reason the note in [`design-notes.md`](design-notes.md) declines
+  all three. `gh pr create` hides the fan-out behind one invocation, so the extra
+  PR fields get more involved here, and partial failure becomes possible: the PR
+  exists but the reviewer was not added. Prefer reporting success with a warning
+  over failing the repo.
 - `422` usually means a PR already exists for that head. That is a skip, not a
   failure — better than the current opaque `failed to create PR`.
-- Back off on `403` secondary rate limits and `5xx`; a 30-repo run trips these.
+- Back off on `5xx` and on secondary rate limits, which arrive as **`403` or
+  `429`** — both, since GitHub uses either. Honour `Retry-After` when it is
+  present and fall back to exponential backoff when it is not. A 30-repo run
+  trips these.
 
 ### Migration
 
