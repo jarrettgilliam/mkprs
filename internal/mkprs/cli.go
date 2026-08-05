@@ -76,6 +76,30 @@ func printUsage(w io.Writer, fs *pflag.FlagSet) {
 	fmt.Fprint(w, usageTail)
 }
 
+// checkFlagValues rejects a flag that has swallowed the `--` separator. pflag
+// takes whatever follows a flag as its value with no guard of its own, so
+// `mkprs tgt -b -- true` sets the branch to "--", leaves the command empty, and
+// reports "no command specified" -- a message about the far end of the line from
+// the mistake.
+//
+// The test is equality, not a `--` prefix: only `--` exactly can be the
+// separator, and a value that merely begins with one is a value. `-m`, `-t` and
+// `-B` are free text and this has no business editing what they may say.
+func checkFlagValues(fs *pflag.FlagSet) error {
+	var err error
+	// Visit covers only the flags actually set, in name order -- so with more
+	// than one offender the message is at least deterministic.
+	fs.Visit(func(f *pflag.Flag) {
+		if err != nil || f.Value.Type() == "bool" {
+			return
+		}
+		if f.Value.String() == "--" {
+			err = fmt.Errorf(`-%s/--%s needs an argument: "--" is the command separator, not a value`, f.Shorthand, f.Name)
+		}
+	})
+	return err
+}
+
 // parseArgs builds the config from argv, returning the flag set alongside it so
 // the caller can render usage. Problems come back as errors -- deciding which
 // stream to print on, and whether to exit, is the command's job.
@@ -111,6 +135,10 @@ func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
 
 	if *help {
 		return nil, fs, pflag.ErrHelp
+	}
+
+	if err := checkFlagValues(fs); err != nil {
+		return nil, fs, err
 	}
 
 	// Everything before `--` is a target dir; everything after is the command.

@@ -21,6 +21,27 @@ Worse, `dedupeRepos` keys on path, so a worktree of an already-discovered repo
 would not dedupe: two entries, two branches, two pull requests against the same
 GitHub repo.
 
+## No flag takes `--` as its value
+
+pflag takes whatever follows a flag as its value, with no guard of its own, so
+`mkprs tgt -b -- true` sets the branch to `--`, swallows the separator, and then
+fails with "no command specified" — a message about the far end of the line from
+the mistake. `checkFlagValues` (`internal/mkprs/cli.go`) rejects a non-bool flag
+whose value is exactly `--`, naming the flag instead.
+
+**Exactly `--`, not the `--` prefix.** The broader rule catches more — `-b
+--draft` is a misparse too — but only `--` can be the separator, and the wider
+test would reach past the mistake into the values themselves. `-m`, `-t` and `-B`
+are free text, so `-m '-- and then some'` has to keep working; a guard about
+argument structure has no business editing what a commit message may say. What
+the narrow rule gives up is caught downstream anyway: a branch named `--draft`
+fails at `git checkout`, loudly and in every repo.
+
+The cost is that `-m --` is now unspellable, with no escape hatch: pflag records
+only a flag's final value, so `-m --` and `-m=--` are indistinguishable
+afterwards, and honouring the `=` form would mean parsing argv a second time
+here. A commit message of exactly `--` is not worth that.
+
 ## No `-c "shell string"` mode
 
 The command is argv after `--`, executed directly — no `eval`, no re-parsing.

@@ -23,6 +23,10 @@ func TestParseArgsUsageErrors(t *testing.T) {
 		{"empty command after separator", []string{"/tmp", "-b", "x", "--"}, "no command specified"},
 		{"unknown flag", []string{"/tmp", "--bogus"}, "unknown flag"},
 		{"missing flag value", []string{"/tmp", "-b"}, "needs an argument"},
+		// pflag takes whatever follows a flag as its value, so a flag left
+		// empty eats the -- separator. That used to surface as "no command
+		// specified", which points at the wrong end of the line.
+		{"separator taken as a flag value", []string{"/tmp", "-b", "--", "true"}, `-b/--branch needs an argument: "--" is the command separator`},
 	}
 
 	for _, tt := range tests {
@@ -46,6 +50,21 @@ func TestParseArgsUsageErrors(t *testing.T) {
 				t.Errorf("error = %q, want it to contain %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// Only `--` exactly is rejected, since only `--` can be the separator. A value
+// that merely starts with it is a value: `-m` is free text, and the guard must
+// not decide what a commit message may say.
+func TestParseArgsKeepsValuesStartingWithDashDash(t *testing.T) {
+	t.Parallel()
+
+	cfg, _, err := parseArgs([]string{"/tmp", "-b", "x", "-m", "-- and then some", "--", "true"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if got, want := cfg.message, "-- and then some"; got != want {
+		t.Errorf("message = %q, want %q", got, want)
 	}
 }
 

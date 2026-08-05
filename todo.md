@@ -533,6 +533,47 @@ is the right default (tools like `dotnet outdated -u` and scaffolders create
 files), but a command that drops build artifacts in a repo with a thin
 `.gitignore` will commit them. `--tracked-only` stages with `git add -u` instead.
 
+### Validate the branch name before any repo is touched
+
+**P1** — turns one bad `-b` from a failure in every repo into one message at
+startup, for a prefix check and a single `git` call.
+
+An invalid `-b` is found by git today, per repo, after that repo has been
+fetched: `mkprs ~/repos -b --draft -- true` fetches forty times and fails forty
+times with `fatal: '--draft' is not a valid branch name`. Nothing unsafe happens
+and the message is git's own, which is a good one — `checkout -b` takes its
+argument positionally, so there is no misparse to defend against here. What is
+wrong is the arithmetic: one mistake, one message, forty repos.
+
+That makes it a startup error, like *Refuse the default branch* under `--update`
+and for the same reason — nothing about the answer varies per repo, so nothing is
+learned by asking each one. Exit as a bad invocation, before discovery.
+
+**Delegate the rules to git.** `git check-ref-format refs/heads/<branch>` is a
+pure string check needing no repo and no network, and it covers spaces (`-b "my
+branch"` is a likelier typo than `--draft`), `..`, a `.lock` suffix, a trailing
+`.`, `@{` and control characters. Reimplementing that list here would drift from
+whatever git actually enforces, and silently.
+
+**The leading dash has to be checked separately**, which is the one thing
+delegation does not get for free: `git check-ref-format refs/heads/--draft` exits
+0. Git's "cannot begin with a dash" rule lives in its branch-name path — `git
+branch -- -foo` refuses — not in `check-ref-format`. So this is a
+`strings.HasPrefix(branch, "-")` test *plus* the exec, and the dash is the case
+that motivated the item.
+
+**Not in `parseArgs`.** That is a pure function of its arguments, deliberately;
+running git inside it would end that and make `cli_test.go` need a git binary to
+test parsing. This goes at startup in `run`, ahead of discovery, where
+`--update`'s default-branch refusal will also land.
+
+`checkFlagValues` already rejects `-b --`, which is a different failure — the
+separator was swallowed, so the branch name is the least of it — and stays where
+it is.
+
+Tests: a valid name passes; a leading dash, an embedded space and `..` each fail
+with the branch named, and fail before discovery has walked anything.
+
 ## Discovery & safety limits
 
 The timeout and `--max-repos` are both safety nets, so **both ship with a default
@@ -793,12 +834,3 @@ Every git helper takes `repoPath` first, which is a method receiver wearing a
 disguise. A `repo` type with `r.git(…)` would delete that parameter from fifteen
 signatures in `git.go` alone. Attractive, and much larger than it looks — worth
 doing only if the file grows again.
-
-### Trailing-flag robustness
-
-**P1** — a real misparse with a one-check fix, and the smallest item in the file.
-
-`mkprs tgt -b -- true` silently takes `--` as the branch name, then fails with
-"no command specified" because the terminator was consumed. pflag has no
-required-value guard for this; an explicit check that no flag value starts with
-`--` would give a better message.
