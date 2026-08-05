@@ -330,6 +330,27 @@ func TestRunExitCodes(t *testing.T) {
 	}
 }
 
+// An unusable branch name is one mistake, and the same one in every repo, so it
+// is reported once before anything is walked. The target here does not exist:
+// if discovery ran first it would be the error reported, so this pins the
+// ordering as well as the check.
+func TestRunValidatesBranchBeforeDiscovery(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"/nonexistent", "-b", "--draft", "--", "true"}, &stdout, &stderr)
+
+	if code != exitUsage {
+		t.Errorf("exit code = %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr.String(), "--draft") {
+		t.Errorf("stderr = %q, want it to name the branch", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "target directory") {
+		t.Errorf("stderr = %q, want the branch checked before the target", stderr.String())
+	}
+}
+
 // A usage error prints the message and the usage block, and prints nothing at
 // all to stdout -- so that piping stdout somewhere useful stays clean.
 func TestRunUsageErrorGoesToStderr(t *testing.T) {

@@ -60,6 +60,28 @@ func gitError(err error) error {
 	return err
 }
 
+// validateBranchName rejects a name git would refuse, so that one bad -b is one
+// message at startup rather than the same failure in every repo.
+//
+// The rules are git's own and stay that way: check-ref-format is a pure string
+// check needing no repo and no network, and it covers spaces, "..", a .lock
+// suffix, a trailing "." or "/", "@{" and control characters. Restating that
+// list here would drift from what git enforces, and silently.
+//
+// The leading dash is the exception, and has to be tested separately: git's
+// "cannot begin with a dash" rule lives in its branch-name path (`git branch --
+// -foo` refuses) and not in check-ref-format, which exits 0 for
+// refs/heads/--draft. That is also the case this whole check exists for -- a
+// flag left without its value, as in `mkprs ~/repos -b --draft -- true`.
+func validateBranchName(branch string) error {
+	// check-ref-format reads only its argument, so there is no repo to run it
+	// in; the empty path leaves cmd.Dir unset, i.e. the process's own cwd.
+	if strings.HasPrefix(branch, "-") || !gitOK("", "check-ref-format", "refs/heads/"+branch) {
+		return fmt.Errorf("invalid branch name %q (see 'git help check-ref-format')", branch)
+	}
+	return nil
+}
+
 // originURL is the configured (not insteadOf-rewritten) URL of origin.
 func originURL(repoPath string) (string, error) {
 	return git(repoPath, "config", "--get", "remote.origin.url")

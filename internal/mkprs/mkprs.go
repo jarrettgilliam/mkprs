@@ -53,6 +53,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 func (a *app) run() int {
+	// Nothing about this varies per repo, so nothing is learned by asking each
+	// one: git would refuse the name in all of them, after each had been walked
+	// and fetched.
+	if err := validateBranchName(a.cfg.branch); err != nil {
+		fmt.Fprintf(a.errw, "Error: %v\n", err)
+		return exitUsage
+	}
+
 	if a.cfg.message == "" {
 		a.cfg.message = strings.Join(a.cfg.command, " ")
 	}

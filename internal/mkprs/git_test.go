@@ -395,3 +395,39 @@ func TestRestoreRepo(t *testing.T) {
 		t.Error("the work branch should have been deleted")
 	}
 }
+
+// The rules themselves are git's, so this asserts the delegation rather than
+// re-listing them: a handful that must pass, and one per class that must not.
+// The leading dash is the case check-ref-format does not cover on its own.
+func TestValidateBranchName(t *testing.T) {
+	t.Parallel()
+
+	valid := []string{"bump-deps", "feature/x", "fix.typo", "release-1.2"}
+	invalid := []string{"--draft", "-x", "my branch", "a..b", "x.lock", "x/", "a@{b}", ""}
+
+	for _, name := range valid {
+		t.Run("valid/"+name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := validateBranchName(name); err != nil {
+				t.Errorf("validateBranchName(%q) = %v, want nil", name, err)
+			}
+		})
+	}
+
+	for _, name := range invalid {
+		t.Run("invalid/"+name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateBranchName(name)
+			if err == nil {
+				t.Fatalf("validateBranchName(%q) = nil, want an error", name)
+			}
+			// The branch has to appear in the message: the whole point is to
+			// say which name was rejected, once, instead of per repo.
+			if !strings.Contains(err.Error(), name) {
+				t.Errorf("error = %q, want it to name %q", err, name)
+			}
+		})
+	}
+}
