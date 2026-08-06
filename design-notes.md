@@ -57,6 +57,12 @@ lives, and a fake written from the same understanding as the code passes on the
 same wrong understanding. `prOpener` earns its seam because `gh` needs network,
 credentials, and eventually multiple implementations.
 
+## stdout is the report; stderr is everything else
+
+stdout carries what mkprs concluded: the `✅`/`⏭️`/`❌` lines, the summary, and
+`--help` when it was asked for. Errors, discarded-target notices, command capture,
+ and all of `--verbose` go to stderr.
+
 ## Execution stays serial
 
 No `-j/--jobs`. Serial is what lets a failure replay its capture as one

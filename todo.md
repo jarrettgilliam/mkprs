@@ -403,12 +403,18 @@ The gaps, in the order they bite:
   **`{}` is expanded in what is printed**, so this is the only place the argv
   that actually ran appears. The command as typed is not the command as run, and
   it differs from repo to repo.
-- **All `--verbose` output goes to stderr** — the trace lines, the internal git
-  streams, and the user's command as it is streamed live. Results keep stdout to
-  themselves: the `✅`/`⏭️`/`❌` lines, the failure replay under them, and the
-  summary. That makes `2>run.log` a complete diagnostic record to read after a
-  failed run, while the console keeps only the terse half, and it costs one
-  argument at the `newCapture` call site.
+- **The capture moves to stderr, in both modes.** The trace lines, the internal
+  git streams and the user's command all go there under `-v` — and so does the
+  quiet-mode failure replay, which today prints under its `❌` on stdout. Results
+  keep stdout to themselves: the `✅`/`⏭️`/`❌` lines and the summary. That makes
+  `2>run.log` a complete diagnostic record to read after a failed run, while the
+  console keeps only the terse half.
+
+  The replay therefore **switches from indentation to the `[repo]` prefix**, which
+  is what keeps it attributable once the streams can be split — so `indented()`
+  goes, and the replay reuses the same formatting the live stream already uses.
+  `newCapture` takes `a.errw` and nothing chooses a stream by flag; see *stdout is
+  the report; stderr is everything else* in [`design-notes.md`](design-notes.md).
 
 #### Mark the lines that only exist because of `-v`
 
@@ -452,7 +458,9 @@ condition in one place instead of at every call site.
 `capture` currently streams to `a.out`; it takes the writer as a constructor
 argument, so this is `newCapture(name, a.cfg.verbose, a.errw)` and nothing
 further. Worth renaming the field off `out` at the same time, since it stops
-being the same stream the reporter writes to.
+being the same stream the reporter writes to — and `outcomeFailed` no longer
+writes to `r.out` at all, so the replay is the capture's own business rather
+than the reporter's.
 
 **Do not add a replay for verbose.** A failure under `-v` already streamed
 everything live; reprinting it under the `❌` would double it. `--stop-on-failure` is
@@ -464,6 +472,11 @@ method and URL in its place. That inherits the redaction constraint from
 *Replace `gh`*: the trace is printed verbatim, so an `Authorization` header must
 never be built into anything traceable. Worth a test that fixes this at the seam
 rather than a rule to remember.
+
+`ghCLI.open` withholds gh's stdout from the log to avoid printing the PR URL
+twice, and its comment says so. The URL is a result and the log is stderr, so
+there is no longer a double print to avoid — the comment goes, and the reason
+gh's stdout is handled separately becomes redaction alone.
 
 Which means **`prOpener.open` should take the capture rather than an
 `io.Writer`**. Only the implementation knows its own invocation, so only the
@@ -486,7 +499,91 @@ is the right default (tools like `dotnet outdated -u` and scaffolders create
 files), but a command that drops build artifacts in a repo with a thin
 `.gitignore` will commit them. `--tracked-only` stages with `git add -u` instead.
 
+## Repository preflight
+
+### Bug: a failed fetch carries on against stale refs
+
+**High** — a wrong skip made on stale data, plus repos left dirty by a push that
+was never going to work.
+
+`fetchOrigin` (`git.go`) discards the error, writes `Could not fetch origin for
+<repo>; using local refs.` into the capture, and continues. Its comment argues
+stale refs beat no run at all — but every path through `processRepo` ends in a
+push and a pull request, so there is no local-only run being preserved. The
+failure is only deferred to a more expensive place.
+
+**The push was going to fail too.** Fetch and push reach the same remote over the
+same transport with the same credentials, so an unreachable host, an expired
+credential helper, a revoked key or a renamed repo fails both. Continuing means
+running the user's command, staging and committing before finding that out — and
+*A failed repo is not cleaned up at all* then leaves the repo standing on the
+working branch with a commit on it. Failing in `preflight` touches nothing.
+
+**`--prune` is a correctness dependency, not a freshness nicety.**
+`branchLocation`'s own doc comment states the precondition: read it after the
+fetch, or a branch deleted upstream still looks like it exists. A silently failed
+fetch violates that, and the repo is skipped with `branch '<b>' already exists on
+origin` for a branch GitHub deleted on merge — a wrong answer, delivered as an
+ordinary `⏭️`, in the re-run-after-merge case. Under `--update` the same stale ref
+feeds row 5, which would create the local branch from a stale `origin/<branch>`.
+
+The stale fork point is the least of it. GitHub diffs a pull request against the
+merge base, so an old base does not inflate the diff by itself; it costs a
+conflict only where the command's changes overlap what landed upstream meanwhile.
+
+**Fail, not skip**, though every other `preflight` exit is a skip. A skip means a
+filter did its job, and under *a run with failed repos still exits 0* it maps to
+exit 0 — so a dropped VPN would report forty skips and exit successfully, which
+is the silent batch failure that item exists to remove.
+
+`fetchOrigin` then loses its `repoName` parameter, since the reason line already
+carries the name through the reporter, and returns an error for `preflight` to
+turn into the failure. It also stops writing prose into the capture, which is the
+whole of the `fetchOrigin` bullet under *Make `--verbose` actually verbose* — that
+bullet goes with this.
+
+**No `--no-fetch` escape hatch.** It would reintroduce every hazard above on
+purpose, and the offline run it implies cannot open a pull request anyway.
+
 ## Command execution
+
+### Bug: a run with failed repos still exits 0
+
+**High** — a batch tool that never reports failure cannot be used from a script,
+and the fix is one counter and a constant.
+
+`exitOK` is returned from `run` no matter how the repos went, and the comment at
+the top of `mkprs.go` states that as the policy: the result lines and the summary
+carry the information. They carry it to a human reading a terminal. `mkprs … &&
+notify`, a CI step, and any wrapper have nothing to test, so a run where fifteen
+repos failed is indistinguishable from one where none did.
+
+Three codes, so "nothing happened, fix your command line" stays distinguishable
+from "work was done and some of it failed" — a wrapper wants to retry one and not
+the other:
+
+| code | meaning |
+| ---- | ------- |
+| 0 | every repo succeeded or was skipped |
+| 1 | usage: bad arguments, an uninterpretable target, over `--max-repos` — no repo was touched |
+| 2 | the run happened; at least one repo failed |
+
+**Skips stay 0.** "No changes to commit", "working tree not clean", "no GitHub
+remote", and every other `⏭️` is a normal outcome of a filter doing its job, not
+a failure. Only `outcomeFailed` sets the code — which is the same test
+`--stop-on-failure` already makes in `processAll`.
+
+**`--stop-on-failure` returns 2 as well.** The flag changes how much of the run
+happens, not whether it succeeded, and a code that differed by it would answer
+"was -s passed?" instead of "did it work?".
+
+`processAll` returns nothing today; it needs to report whether any repo failed —
+`reporter` already counts it — and `run` maps that to `exitFailure`. The comment
+above the `exit*` constants states the opposite of all this and goes with it.
+
+**The codes belong in the usage text**, since nothing else would tell a user
+writing a script that 1 and 2 mean different things. `usageTail` (`cli.go`) is
+where it goes, near the paragraph that already explains what `-s` does to a run.
 
 ### Bug: `runCommand` reports an exit code the command never had
 
@@ -604,9 +701,9 @@ fine-grained PAT needs *Pull requests: write* plus *Contents: read*.
 
 **Never let the token reach disk or `ps`.** Pass it as an `Authorization` header
 built at call time — not on a command line, and not into the `capture`. That
-last one is sharper than it looks: a failed repo now replays its entire capture
-to stdout, so anything the API layer writes there is printed verbatim. A
-redaction test is worth having.
+last one is sharper than it looks: a failed repo replays its entire capture, so
+anything the API layer writes there is printed verbatim. A redaction test is
+worth having.
 
 **Enterprise**: derive the host from `remote.origin.url` rather than hardcoding
 `api.github.com`; GHES lives at `https://<host>/api/v3/`. `originURL` already
