@@ -1,14 +1,5 @@
 # mkprs — open feature work
 
-Formerly `git-patch-apply.sh`, then `mkprs.sh`. The patch-specific design was
-replaced with "run an arbitrary command in each repo"; the items that only made
-sense for patching (`--source` selection, patch-hash branch names, `--3way`
-apply) have been dropped rather than carried forward. The bash implementation
-was ported to Go at strict parity and deleted, `test.sh` was replaced by
-`go test ./...`, and `gh` now sits behind the `prOpener` interface so it can be
-mocked and, later, swapped for direct API calls.
-
-Completed items are deleted rather than marked done — `git log` is the record.
 Each item is a heading so the list can be skimmed from GitHub's outline, and
 nothing is numbered, so items can come and go without renumbering.
 
@@ -17,119 +8,49 @@ Decisions already settled — including the ones about what mkprs deliberately d
 
 ## Priorities
 
-Every item carries a band on the line under its heading. The point is to decide
-the order once, with the whole list in view, rather than re-argue it at the start
-of each session — picking the next item ad hoc reliably favours whatever is most
-interesting that day, which is not the same as whatever is most useful.
-
-The sections below group by subject, not by urgency, and that stays: a flag
-belongs with the other flags whatever it costs. The band is the second axis.
+Every item carries a band on the line under its heading, so the order is decided
+once rather than re-argued each session. Sections group by subject; the band is
+the second axis.
 
 **The rules, in the order they are applied.**
 
-1. **Bugs before features.** Something that behaves wrongly today outranks
-   something that does not exist yet, and it outranks it regardless of size —
-   wrong behaviour is being relied on while it goes unfixed, and every feature
-   built over it inherits the fault. This is why the discarded-`gitError` bullet
-   — one bullet inside a P2 item — carries P1 of its own and gets lifted out
-   ahead of the feature it is written under.
-2. **Prerequisites above what they unblock.** An item another item is waiting on
-   moves up to meet it. Doing them in the other order means building the
-   dependent item twice, or building a workaround that then has to be deleted.
-3. **Value against effort, for everything left.** Cheap and useful first;
-   expensive and marginal last. The two ends are easy; the middle is judgement,
-   and the one line under each heading is where that judgement is recorded so it
-   can be disagreed with.
-4. **Safety nets are worth more than their size suggests.** They are cheap to
-   build and they bound a failure that lands in other people's repositories,
-   which is not a cost this tool gets to absorb quietly.
-5. **Documentation last.** Prose written against a moving tool is prose with an
-   expiry date, and a stale README is worse than none because it is believed.
+1. **Bugs before features**, regardless of size. A bug written inside a feature
+   item is still a bug: its own band, its own line, done first.
+2. **Prerequisites above what they unblock.**
+3. **Value against effort, for everything left.** The middle is judgement, and
+   the line under each heading records it so it can be disagreed with.
+4. **Safety nets outrank their size.** They bound a failure that lands in other
+   people's repositories.
 
 **The bands.**
 
-- **P1** — bugs, safety nets, and cheap work another item is waiting on.
-  Everything here is small, and none of it should sit behind a feature. This band
-  is meant to stay short and to be emptied.
-- **P2** — the features. Most of the tool's remaining worth is here, and so is
-  most of the remaining work.
+- **P1** — bugs, safety nets, and cheap work another item is waiting on. Short,
+  meant to be emptied, and never behind a feature. Usually small, but size does
+  not buy a bug its way out.
+- **P2** — the features. Most of the remaining worth and most of the work.
 - **P3** — high cost against low reward, plus work deliberately parked. Not
-  "never", but doing any of it ahead of P2 would be a mistake rather than merely
-  early.
+  "never", but ahead of P2 it would be a mistake rather than merely early.
 
-**Maintaining the bands.**
-
-Within a band the order is loose by default — the band is the commitment. Where
-an item's position *is* fixed it says so on its own band line, and nowhere else.
-Anything without such a note is loose within its band.
-
-A band is not permanent. Finishing an item can promote another by clearing its
-prerequisite, and a P3 can move up on evidence — a real repo that needs it, or a
-run that goes wrong in the way it would have prevented. Rebanding is a normal
-edit; leaving a band stale because it was written down once is not the intent.
-
-New items get a band when they are added, while the reasoning is fresh. An item
-with no band is an item nobody has decided about yet.
+**Maintaining the bands.** Order within a band is loose; the band is the
+commitment. A fixed position is stated on the item's own band line and nowhere
+else. Rebanding is a normal edit — finishing an item can promote another by
+clearing its prerequisite, and a P3 moves up on evidence. New items get a band
+when they are added; an item with no band is one nobody has decided about yet.
 
 ## Working agreement
 
-*Priorities* settles which item is next. This settles how it gets built, and it
-is binding for the same reason: decided once, in the calm, rather than
-renegotiated in the middle of a feature where every rule looks like an obstacle.
-
-**Red-green TDD.** Write the failing test first, run it, watch it fail, and only
-then write the code that makes it pass. The order carries the whole value, and it
-buys two separate things.
-
-The first is that the test gets tested. A test that has never been seen to fail
-has not been shown to test anything: it may assert on the wrong value, exercise a
-path it does not reach, or pass vacuously because a helper returned early.
-Watching it go red for the reason you predicted is the only evidence that its
-green means something later. This is not hypothetical here — several tests turn
-on git behaving in a particular way, and a test written around a wrong belief
-about git passes both before and after the fix.
-
-The second is that behaviour gets defined before there is an implementation to
-shape it. A test written afterwards describes what the code does; a test written
-first describes what it should do, and the difference shows up exactly where it
-matters, in the edge cases the implementation quietly declined to handle. Most
-items above already contain their own test list — the skip conditions, the table
-rows, the message text — so the definition work is largely done and the tests
-follow it.
-
-**Red has to be red for the right reason.** In Go a test naming a function that
-does not exist yet fails to *compile*, which is not the same as failing, and
-proves nothing about the assertion. Stub the function first — the signature, and
-a body that returns a zero value or panics — so the suite builds and the test
-fails on its assertion, with a message that reads the way it should when the
-feature later breaks. If the failure message would not tell you what went wrong,
-fix it now, while it is on screen.
-
-**One item at a time.** Take a single item, finish it, hand it back. Two items in
-one change cannot be reviewed as either, cannot be reverted separately, and blur
-which test covers which decision. The temptation is always the adjacent fix
-noticed on the way past — the right home for it is a new item here, or a line
-added to the item that already owns it. Where an item explicitly carries a
-separable piece, splitting it is fine and stays within this rule; the
-discarded-`gitError` bug under *Make `--verbose` actually verbose* is the example,
-and it says so.
-
-**Ask rather than assume.** When this file and the source do not settle a
-question, ask it — a guess that turns out wrong is discovered at review, after
-the tests have been written around it. Questions are cheap and the answers are
-durable: each one becomes a line here or a note in
-[`design-notes.md`](design-notes.md), so the same question is asked once rather
-than re-derived by whoever meets it next. Most of the detail in the items above
-started as exactly that.
-
-**Finish by updating this file, then stop.** Delete the completed item — `git log`
-is the record — and fold back anything the work turned up: a decision worth
-keeping goes to [`design-notes.md`](design-notes.md), a follow-up becomes a new
-item with a band, and any item whose prerequisite just cleared gets rebanded.
-Then stop for review.
-
-**Committing is not part of finishing.** Review, commit and push are the author's,
-and they happen between items, not inside them. Leave the work in the tree.
+- Instead of picking the first item, pick an item from the list using the
+  rules from the priorities section above.
+- Use red/green test driven development (TDD).test Write failing tests first,
+  then make them pass. This validates the test works as it should, while also
+  clearly defining behavior before writing the implementation.
+- Work on a single item at a time.
+- If you have any questions that this file or source code doesn't clarify, ask.
+  Don't make assumptions.
+- When finished, update this file. Completed items are deleted rather than marked
+  done then stop. I'll review, commit, and push before work starts on the next feature.
+- Do not add to [`design-notes.md`](design-notes.md). These notes are
+ architectural decisions that drive this TODO list. It's not a changelog.
 
 ## Flags & UX
 
@@ -151,20 +72,6 @@ rather than inventing a set from scratch:
 | `e` | drop into a shell in the repo; on exit, re-read the diff and ask again | manually edit the current hunk |
 | `a` | accept this and every remaining repo — stop asking | stage this hunk and all later ones in the file |
 | `q` | abort the run; this repo and the rest are left untouched | quit |
-
-Every key carries its `git add -p` sense, widened from a hunk to a repo. `e` is
-the one that stretches furthest — a shell rather than an editor — but it is
-git's slot for hand-intervention, which is exactly what this is. `a` is the
-other stretch: git's stops at the end of the current file, and there is no mkprs
-equivalent of "this file", so it means the rest of the run.
-
-**`d` and `s` stay unbound**, rather than being given mkprs meanings that fight
-their git ones. Git's `d` — skip this hunk and every later one *in this file* —
-has no repo-scoped equivalent that is not already `q`, and `s` splits a hunk,
-which does not arise here. Both are likely presses from muscle memory, so answer
-them with a pointer (`d` → "`n` skips this repo, `q` stops the run") rather than
-re-prompting silently. Print the key list before the first prompt, not just on
-`?`, so the meanings are on screen when they are needed.
 
 Notes that matter for the implementation:
 
@@ -193,21 +100,14 @@ by hand, and starting over. This turns those into a detour: land in the repo on
 the working branch, fix it, `exit`, carry on.
 
 - **Launch `$SHELL`**, falling back to `/bin/sh`. On Windows `$SHELL` is
-  normally unset, so fall back to `%COMSPEC%` (or `powershell`). The test suite
-  is written to run there — `smoke_test.go` appends `.exe`, and the fixtures
-  avoid `bash -c` for exactly this reason — so this cannot be POSIX-only.
-  (Nothing actually runs it on Windows today: there is no CI, so "Windows works"
-  is a design constraint here, not a measured fact.)
+  normally unset, so fall back to `%COMSPEC%` (or `powershell`). (This cannot be POSIX-only)
 - **Working directory is the repo root**, matching where the command ran.
 - **Pass the real terminal through** — `os.Stdin`, `os.Stdout`, `os.Stderr`
   directly. This is the deliberate exception to how everything else runs:
   commands get `/dev/null` on stdin and have their output captured, but a shell
   that cannot see its own tty is useless, and the user's session must not end
   up in the capture that a later failure replays.
-- **Export `$REPO` and `$REPO_NAME`** exactly as the command gets them, plus
-  something like `$MKPRS_BRANCH` so a prompt can show what is going on. Being
-  dropped into a shell with no indication of which repo, or that a branch is
-  checked out under you, is disorienting.
+- **Export `$REPO` and `$REPO_NAME`** exactly as the command gets them.
 - **Ignore the shell's exit code.** People type `exit 1` and hit Ctrl-D out of
   habit; neither means "fail this repo".
 - **Re-read the diff afterwards, never cache it.** The entire point is that the
@@ -215,23 +115,8 @@ the working branch, fix it, `exit`, carry on.
   is there now — including the case where the user reverted everything, which
   should then fall through to the usual "command made no changes" skip.
 
-**Hand-typed `git commit` is already handled.** It used to be read as "no
-changes" and have its branch deleted; `processRepo` now decides via `branchAhead`
-(`git rev-list --count <base>..<branch>`) instead of the index, so a commit counts
-no matter who made it. Nothing extra is needed for `e` beyond re-reading the diff.
-
 **`git checkout` inside the shell fails the repo**, by the same rule that applies
-to the command itself — and the shell is exactly where someone would reach for
-it. The failure is safe (the branch and its commits survive), but the message is
-written for a command, not for someone standing in a prompt. Worth either a
-clearer message under `-i` or an explicit note at the prompt that the branch must
-stay put.
-
-**This supersedes `--preview`**, which was going to run the command in a
-throwaway `git worktree`, print a diffstat and discard the result. That is
-strictly worse: it pays the full cost of running the command and then throws
-the work away, so a run you approve of has to be done twice. Pausing on the
-real thing gives the same look at the same diff, and lets you continue.
+to the command itself.
 
 **It deliberately does not touch `--max-repos` or the timeout.** Prompting on the
 count would turn a circuit breaker into a reflexive `y`, and the friction of
@@ -244,7 +129,7 @@ exists to prevent.
 **P2** — the band's highest value and its largest change; nothing is waiting on
 it, so it follows the P1 items rather than leading them.
 
-Once a run has opened its pull requests, mkprs cannot touch them again: the
+Today, once a run has opened its pull requests, mkprs cannot touch them again: the
 branch now exists, so `preflight` skips every repo with `branch '<b>' already
 exists on origin`. That reads like a guardrail but is the tool declining to help
 — the forgotten file, the second cleanup pass, the fix that occurs to you after
@@ -280,14 +165,14 @@ Pure git, no query to GitHub. Local and remote here mean `refs/heads/<branch>`
 and `refs/remotes/origin/<branch>` after `preflight`'s existing
 `fetch --prune`:
 
-| Local | Remote | On the same commit as | Continue? |
-|---|---|---|---|
-| Y | Y | each other | **Yes** — `checkout <branch>`, commit, update the PR |
-| Y | Y | — differ | **No** — skip |
-| Y | N | the default branch | **Yes** — `checkout <branch>`, commit, open a PR |
-| Y | N | — differ | **No** — skip |
-| N | Y | n/a | **Yes** — create the local branch from origin's |
-| N | N | n/a | **Yes** — create it from the default branch, as today |
+| Row | Local Branch Exists | Remote Branch Exists | Branches on same commit?   | Continue? |
+| --- | ------------------- | -------------------- | -------------------------- | --------- |
+|   1 | Y                   | Y                    | Yes                        | Yes       |
+|   2 | Y                   | Y                    | No                         | No        |
+|   3 | Y                   | N                    | Same as the default branch | Yes       |
+|   4 | Y                   | N                    | Different from default     | No        |
+|   5 | N                   | Y                    | N/A                        | Yes       |
+|   6 | N                   | N                    | N/A                        | Yes       |
 
 **Every "yes" needs no ref moved; every "no" would.** That is the whole rule, and
 it is *mkprs never moves a branch to a commit it did not create* in
@@ -308,13 +193,14 @@ Rows 5 and 6 are the common path: mkprs deletes its own local branch on success,
 so the state after a normal run is *local absent*. The rows with a local branch
 present arise only after `--keep-branch`, a failure, or a hand-made branch.
 
-**Row 2 also covers "local strictly behind remote"**, which is provably safe to
-fast-forward and is skipped anyway, for the reason above. The manual `reset
---hard` in the few affected repos is the price of keeping the rule whole. Never
-force-push, by the same logic: a reviewer's suggestion committed through the
-GitHub UI must not be overwritten.
+Row 2 covers the local branch being either behind or ahead of the remote.
+If behind, we would have to "pull", which moves the ref (breaking the design rule).
+If ahead, `mkprs` could potentially push more work than was intended.
+The solution to both is manual intervention. manually push manual work before starting,
+or pull commits others have made. Both are safeguards. Don't push work you didn't do
+and don't pull work that could break the command you're about to run.
 
-**Row 4 protects unpushed work as a side effect.** The commits there might be a
+**Row 4 protects un-pushed work as a side effect.** The commits there might be a
 squash-merged PR whose branch GitHub then deleted, or genuine local work that was
 never pushed — and git cannot tell the two apart, because squashing rewrites the
 SHAs. Only the PR's state distinguishes them, and asking for it would mean
@@ -326,18 +212,11 @@ Both skips name the branch and say what would unblock them — delete it, or pus
 it — since the repo is otherwise silently absent from a run the user expected it
 in.
 
-**What the table gives up**, knowingly: a PR that was squash-merged in a repo
-that does *not* auto-delete the branch. Local and remote still agree, so row 1
-continues and the new PR re-proposes the already-merged commits alongside the new
-one. That is a visibly wrong PR rather than destroyed work, it is caught in
-review, and closing it costs nothing.
-
-**`branchLocation` cannot answer this**, despite looking like it does. It returns
-`"locally"` as soon as the local ref exists and never looks at origin, so rows 1,
-3 and 5 are indistinguishable through it. The table needs local and remote
-presence as independent facts plus a rev comparison — a new helper, with
-`branchLocation` left alone for the cleanup rule below, which only needs the bit
-it already reports.
+Let's also talk about a PR that was squash-merged in a repo that does *not*
+auto-delete the branch. Local and remote still agree, but neither can be
+merged into the default branch, because they've diverged. `mkprs` should
+check for this scenario in the `preflight` function of run.go and "skip"
+if that's the case.
 
 #### Where the branch starts from, by row
 
@@ -345,23 +224,26 @@ it already reports.
 `--update` that stops being one thing:
 
 - **Rows 1 and 3** — `checkout <branch>`. It exists locally and is already on the
-  commit the work starts from; moving it is what the table forbids.
+  commit the work starts from.
 - **Row 5** — create it from `origin/<branch>`, continuing the pushed branch.
 - **Row 6** — create it from `origin/<default>`, exactly as today.
 
 So `prep.base` becomes row-dependent rather than always `resolveBase`'s answer,
 and this is the main structural change `--update` makes to `processRepo`.
 
-#### Comparing against pre-command HEAD, not against base
+#### On `branchAhead` functionality
 
 `branchAhead` measures the branch against `origin/<default>`, which on a
 follow-up run is already true from last time — so a command that changed nothing
 would push and report success on a no-op.
 
-Compare against **HEAD as it stood when the command started** instead. On a fresh
-run the branch is cut from base, so the two are identical and nothing changes;
-this is a generalization rather than a second path, and it makes the existing
-"command made no changes" skip more precise on its own terms.
+Instead, we should only report success if `mkprs` pushes code or creates a PR.
+If all the code and PR already exist on the server, tell the user that and skip.
+If code is pushed or a PR is created, tell the user that and report success.
+This fills in a functionality gaps. If the user command, stage, and commit all work,
+but push or PR creations fails (Due to poor network, auth failure, etc) the user
+has an automated path to push and create a PR for all repos after fixing network
+and auth issues.
 
 #### Cleanup restores the branches the repo had
 
@@ -372,10 +254,7 @@ and deleted afterwards; a branch that was already checked out locally stays.
 
 `branchLocation`'s existing answer is enough here — cleanup only needs to know
 whether the branch was local when the run arrived, which is exactly the bit it
-already reports. (The table above needs more than that; see the note under it.)
-
-Safe on every path: success pushed the commit, a skip pushed nothing but origin's
-copy predates the run, and a failure never reaches cleanup at all.
+already reports.
 
 **This makes `-k` a no-op whenever the branch already existed locally**, which is
 every row 1 and row 3 run. The branch is kept because it was there to begin with,
@@ -394,9 +273,15 @@ rule the delete is never attempted.
 
 #### Opening versus updating the pull request
 
-`openPR` has to become create-or-return-existing — that much, and no more.
-`prOpener` keeps returning a URL; the table above deliberately avoids needing PR
-*state*, so the interface does not grow a field.
+`openPR` has to become create-or-return-existing while also returning to the caller if
+the PR was created or already existed, since that along with if anything was
+pushed determine the outcome: skip or success.
+
+Along those lines, run.go's `commitAndPush` function should be split into independent
+`commit` and `push` functions. `push` will need to return whether the push did
+anything at all (separate from err). If git reports, "Everything up-to-date"
+and the PR already exists, outcome should be skip. If push actually pushed a
+commit, or a PR is creates, outcome should be success.
 
 `gh pr create` fails when a PR exists for the head branch, and today that
 surfaces as a plain repo failure even though the push succeeded — so it needs
@@ -408,9 +293,9 @@ notes* is the cleaner version of the same thing, so this gets simpler after
 commit describes its increment, so there is nothing to restate — and a title
 edited by a human during review must not be overwritten by one derived from
 whatever command this run happened to pass. `--message` already applies per run,
-so each update commit gets its own command-derived message for free. `--draft`
-and `-r` apply on the create path and have nothing to act on when updating; say
-so rather than silently ignoring them.
+so each update commit gets its own command-derived message for free. `--title`,
+`--body`, `--reviewers`, and `--draft` apply on the create path and have nothing
+to act on when updating; say so rather than silently ignoring them.
 
 **Report the two apart**, which costs one field. `outcomeSuccess` holds only
 `prURL` and `outcome.go` hardcodes `"PR created"`, so this is an `updated bool`,
@@ -419,18 +304,6 @@ three summary counters: `Succeeded` is true of both, and the per-repo lines
 already carry the distinction. If the new-PR count is wanted at a glance,
 `Succeeded: 20 (12 created, 8 updated)` is the form that still sums to the repo
 count.
-
-**A missing PR is opened on the way past, but only if this run commits
-something.** If an earlier run pushed and then failed at `gh` — no auth, a 403 —
-origin has the branch and no PR exists. That is row 5, and create-or-return
-opens the missing one. It is not a repair mode: `-- true` would reach the
-pre-command HEAD check first and skip as "command made no changes", so nothing
-gets opened without a real change to make. Requiring a command stays, and
-allowing one to be omitted stays rejected — the PR title derives from the command
-text, so there would be nothing to name the PR with. The real fixes for this
-state are in *Replace `gh`*: fetching the token early kills the unauthenticated
-case before any repo is touched, and backing off on `403` and `5xx` kills the
-throttled one.
 
 ### `--list` to preview the repo set
 
@@ -461,9 +334,7 @@ actually verbose*.
 
 ### Make `--verbose` actually verbose
 
-**P2, after `--fail-fast`** — wide, shallow work at every git call site; the
-discarded-`gitError` bullet below is a plain bug, is P1, and can be lifted out
-and done alone.
+**P1, after `--fail-fast`** — wide, shallow work at every git call site.
 
 Today it streams one thing — the user's command's two streams, prefixed
 `[repo]` — and nothing else. Everything mkprs itself does is either suppressed or
@@ -484,26 +355,40 @@ The gaps, in the order they bite:
   `status --porcelain` is precisely the list of files that made a repo skip as
   "working tree not clean", and today that list is unobtainable without
   re-running git by hand.
-- **Those errors are discarded at every call site.** `getDefaultBranch` failing
-  becomes `skip("could not determine default branch")`; `branchAhead` failing
-  becomes `fail("could not compare …")`. `gitError` now folds git's own words
-  into the returned error, but nothing writes it anywhere, so it dies at the
-  call site — in quiet mode as well as verbose. This one is a plain bug and
-  fixable independently of the rest.
+- **git's stderr goes to the `-v` console and nowhere else.** It must never be
+  appended to a skip or fail reason. Those lines are read by people who did not
+  ask how mkprs works and should not have to know: `could not compare 'b' to
+  origin/main` is the message, and `fatal: ambiguous argument 'origin/main..b'`
+  under it is a complaint from a `git rev-list` the user never typed, cannot see,
+  and gains nothing from. Quiet mode stays plain English about what mkprs
+  concluded; `-v` is where the evidence lives, under a `$` line that says which
+  command produced it.
+
+  Consequence: **delete `gitError`** as part of this item. Its only purpose is to
+  fold git's first stderr line into an error so a reason line can carry it, which
+  is the thing being ruled out. Nothing consumes it today either — `getDefaultBranch`
+  and `branchAhead` return a `bool`, so the error dies inside the helper — and
+  once `git` buffers stderr to echo it under `-v`, the console has the full text
+  anyway. Keeping it would leave a helper whose only reader is a rule against
+  reading it.
 - **`--quiet`/`-q` on the mutating commands.** `checkout -b … --quiet`,
   `commit -q`, `push … --quiet` and `fetch … --quiet` all route through `gitTo`,
   so they would stream — the flag is what silences them. Under `-v` that costs
   commit's "3 files changed, 40 insertions", checkout's "Switched to a new
   branch", and push's `remote:` lines. Pass the quiet flags only when not
-  verbose. Do not reach for `--progress` on fetch/push to force the transfer
+  verbose. If that becomes too cumbersome, stop passing `--quiet` altogether
+  and only stream the output in --verbose mode. Otherwise ignore stdout and stderr.
+  Do not reach for `--progress` on fetch/push to force the transfer
   meter back: git suppresses it off a tty for good reason, and it is noise
   rather than information.
 - **`git branch -D`'s stdout is discarded** by `gitErrTo` as noise, but
   "Deleted branch bump-deps (was abc1234)" carries the only record of what was
   just thrown away. Under `-v` it should print.
-- **The command is never echoed.** Output arrives attributed to a repo but not
-  to what produced it, and with git's own output added the mixture gets worse,
-  not better.
+- **Echo the user's command.** in the same way that `git` commands are, preceded by a `$`
+  This makes the output consistent for commands in verbose mode.
+- All `--verbose` output should go to stderr. That way debug logs can be redirected
+  to a file for researching later if a run failed, while Keeping the console output terse.
+  The redirected is optional of course, but a nice feature.
 
 #### Mark the lines that only exist because of `-v`
 
@@ -518,9 +403,15 @@ from the output it is narrating:
 ```
 
 The `$` marker is the shell-prompt convention for "this is the command, not its
-output" — the same idea as `set -x`, though not the same character: `set -x`
-prefixes with `PS4`, which is `+ ` by default.
-Echo before running, not after, so a hang is attributable to the line above it.
+output". Echo before running, not after, so a hang is attributable to the line above it.
+
+**Quote the arguments that would otherwise read as several.** Joining argv on
+spaces turns `-m` `Fix typo in README` into four arguments on screen, and the
+commit message defaults to the command text, so this is the common case rather
+than the exotic one. POSIX single quotes are enough: nothing re-parses a trace
+line, so the only requirement is that a reader can see where each argument ends.
+`{}` expansion happens first — it is the whole reason two repos run different
+argv, so tracing the unexpanded form would hide the only part that varies.
 
 **Trace lines go straight to `c.out`, never into `c.buf`.** The buffer is what a
 failure replays under `❌` in quiet mode, and it must keep holding exactly what
@@ -541,14 +432,21 @@ method and URL in its place. That inherits the redaction constraint from
 never be built into anything traceable. Worth a test that fixes this at the seam
 rather than a rule to remember.
 
+Which means **`prOpener.open` should take the capture rather than an
+`io.Writer`**. Only the implementation knows its own invocation, so only the
+implementation can narrate it, and a plain writer gives it no way to distinguish
+a trace line from the output it is narrating. Handing it the capture puts the
+redaction constraint on the side of the seam that can actually honour it. The
+alternative — `openPR` calling `ghArgs` itself to trace before delegating — leaks
+gh's argv into the caller that exists to not know about gh.
+
 Most of the filters listed above now live in `preflight`, which is a contiguous
 block rather than six statements scattered through `processRepo` — so the trace
 lines land in one place.
 
 ### `--tracked-only` staging
 
-**P2, last of the band** — smallest feature left, `-A` against `-u` behind a
-bool, but it guards a case that has not actually come up yet.
+**P2, last of the band** — smallest feature left, `-A` against `-u`
 
 `git add -A` stages everything the command left behind, including new files. That
 is the right default (tools like `dotnet outdated -u` and scaffolders create
@@ -594,18 +492,21 @@ does not spend two of the budget.
 
 ## Replace `gh` with direct GitHub API calls
 
-**P2** — high work and high reward: it drops the last external binary, and the
-README's install section is waiting on it.
+**P2** — high work and high reward: it drops the last external binary
 
 `gh` is the last external binary mkprs needs, which undercuts the reason it was
 written in Go: download one file and run it, on any platform. A user without the
 GitHub CLI gets `'gh' (GitHub CLI) is not installed` and no PRs.
 
-Opening a pull request is one `POST`, so this costs a `net/http` call and an auth
-story — no new dependencies. **The seam already exists.** `ghCLI` implements
+Opening a pull request is a few rest requests, so this costs some `net/http` calls and
+an auth story — no new dependencies. **The seam already exists.** `ghCLI` implements
 `prOpener` (`internal/mkprs/pr.go`); a `restAPI` implementing the same interface
 drops in without touching `openPR`, and the end-to-end tests inject `fakePR`, so
 they need no rewriting either. `ghCLI` then goes — see *Migration* below.
+
+But do add new tests for the new `prOpener` implementation and continue to use
+red/green TDD. Use standard golang methods to intercepts the calls to github. Do
+not call out to github or create PRs as part of the test.
 
 ### Authentication
 
@@ -710,47 +611,6 @@ requirement, which is the point of this whole item.
 tests, not from having two production implementations.
 
 ## Polish
-
-### There is no `README.md`
-
-**P3, and last of everything** — almost every open item changes what it would
-say; see *Write this last* below.
-
-The repo has no README.md file. Someone landing on it from GitHub gets no idea
-what mkprs is, and `todo.md` is the closest thing to documentation, which reads
-as a backlog rather than an introduction.
-
-Worth covering, roughly in this order:
-
-- **What it is, in two sentences**, with one example that shows the whole
-  shape. The `dotnet outdated -u` one from `usageTail` earns its place: run a
-  command across every repo under a directory, commit, open a PR each.
-- **Install.** `go install github.com/jarrettgilliam/mkprs@latest`, plus the
-  `gh` prerequisite and `gh auth login` — today a user without the GitHub CLI
-  finds out by watching every repo fail. (*Replace `gh`* above removes that
-  requirement; until it lands the README has to state it.)
-- **How it behaves per repo**: cut a branch from the default branch, run the
-  command, `git add -A`, commit, push, open the PR against the default branch,
-  then restore and delete the branch. The skip and failure conditions belong
-  here too — that is the part `--help` states tersely and a reader actually
-  needs prose for.
-- **The `{}` / `$REPO` / `$REPO_NAME` contract** and the no-shell rule.
-
-**Do not restate the flag table.** It lives in `usageHead` and pflag's generated
-`FlagUsages`, and a copy in the README will drift the first time a flag is added
-— several items under *Flags & UX* above add one. Link to `mkprs --help` and keep
-the README to the parts that are stable.
-
-Same risk applies to the examples, which is an argument for using few and
-choosing ones tied to behaviour that will not change.
-
-**Write this last.** Almost every open item above changes something the README
-would have to state: the flags under *Flags & UX* and *Discovery & safety limits*
-each add a line, and *Replace `gh`* removes the install prerequisite entirely.
-Documenting the tool before those land means writing prose with a known expiry
-date. The cost of having no README is borne by strangers arriving from GitHub,
-which is not yet the audience; the cost of a stale one is borne by them too, and
-is worse, because it is believed.
 
 ### Spell out names that outlive their line
 
