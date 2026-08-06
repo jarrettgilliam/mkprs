@@ -58,7 +58,7 @@ when they are added; an item with no band is one nobody has decided about yet.
 
 ### `-i, --interactive` review gate
 
-**Low** — the largest item here, and `--list`, `--fail-fast` and `--update` each
+**Low** — the largest item here, and `--list` and `--update` each
 deliver a piece of its value far more cheaply.
 
 Pause in each repo after the command has run but before anything is staged,
@@ -317,26 +317,9 @@ exit without running anything. Cheap, and it covers the "what would this touch?"
 half of the old `--dry-run` that `-i` does not, since `-i` still runs the command
 before it asks.
 
-### `--fail-fast` to stop at the first failure
-
-**High** — a flag and a `break`, and *Make `--verbose` actually verbose* depends on
-it landing first.
-
-The main loop always continues after a failure. When the first repo fails because
-the command itself is wrong, you want to stop and fix it rather than watch 29
-more failures scroll by.
-
-This also repairs `--verbose`, which is currently worse than the default for
-diagnosing a failure: quiet prints the failing repo's output as one contiguous
-block under its `❌`, while verbose streams those bytes live mixed with every
-other repo's and skips the replay. Stopping at the first failure makes that
-moot — one repo's worth of output, and it is the last thing on screen. This is
-the fix for that, rather than teaching verbose to replay; see *Make `--verbose`
-actually verbose*.
-
 ### Make `--verbose` actually verbose
 
-**High, after `--fail-fast`** — wide, shallow work at every git call site.
+**High** — wide, shallow work at every git call site.
 
 Today it streams one thing — the user's command's two streams, prefixed
 `[repo]` — and nothing else. Everything mkprs itself does is either suppressed or
@@ -465,7 +448,7 @@ further. Worth renaming the field off `out` at the same time, since it stops
 being the same stream the reporter writes to.
 
 **Do not add a replay for verbose.** A failure under `-v` already streamed
-everything live; reprinting it under the `❌` would double it. `--fail-fast` is
+everything live; reprinting it under the `❌` would double it. `--stop-on-failure` is
 the answer to "the failing repo's output is scattered among the others", and it
 is a better one than a replay.
 

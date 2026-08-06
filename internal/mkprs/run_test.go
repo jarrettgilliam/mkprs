@@ -636,7 +636,125 @@ func TestRunFailures(t *testing.T) {
 	})
 }
 
-// -k skips cleanup outright rather than skipping only the delete: the repo is
+// -s/--stop-on-failure is about the repos after the failure: when the command
+// itself is wrong, one repo's worth of output is the diagnosis and twenty-nine
+// more is noise. A skip is a normal result and does not stop anything.
+func TestRunStopOnFailure(t *testing.T) {
+	t.Parallel()
+
+	t.Run("stops at the first failing repo", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("a")
+		second := f.repo("b")
+		third := f.repo("c")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "wip", "--stop-on-failure"}, helperCmd(t, "fail", "3", "it went wrong")...)
+
+		if got.code != exitOK {
+			t.Errorf("exit code = %d, want %d even when a repo fails", got.code, exitOK)
+		}
+		if !strings.Contains(got.stdout, "❌ a command exited 3") {
+			t.Errorf("stdout = %q, want the first repo's failure", got.stdout)
+		}
+		if !strings.Contains(got.stdout, "Failed:        1") {
+			t.Errorf("summary counted more than the one failure:\n%s", got.stdout)
+		}
+		// The repos after it were never touched -- no branch, no result line.
+		for _, repo := range []string{second, third} {
+			name := filepath.Base(repo)
+			if strings.Contains(got.stdout, "❌ "+name) {
+				t.Errorf("%s was processed after the failure:\n%s", name, got.stdout)
+			}
+			if localHasBranch(t, repo, "wip") {
+				t.Errorf("%s has a working branch, so it was processed", name)
+			}
+			if got := currentBranch(t, repo); got != "main" {
+				t.Errorf("%s left on branch %q, want main", name, got)
+			}
+		}
+	})
+
+	// The repos left out get their own counter rather than joining the skips:
+	// nothing looked at them, and every ⏭️ line on screen has to keep matching
+	// the number the summary reports.
+	t.Run("says how many repos it did not reach", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("a")
+		f.repo("b")
+		f.repo("c")
+
+		got := run(t, &fakePR{}, []string{f.targets, "-b", "wip", "--stop-on-failure"}, helperCmd(t, "fail", "1", "nope")...)
+
+		if !strings.Contains(got.stdout, "Stopped at the first failure.") {
+			t.Errorf("stdout = %q, want a note that the results end early", got.stdout)
+		}
+		for _, want := range []string{"Failed:        1", "Skipped:       0", "Not processed: 2"} {
+			if !strings.Contains(got.stdout, want) {
+				t.Errorf("summary missing %q:\n%s", want, got.stdout)
+			}
+		}
+	})
+
+	t.Run("says nothing when the last repo is the one that fails", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("a")
+
+		got := run(t, &fakePR{}, []string{f.targets, "-b", "wip", "--stop-on-failure"}, helperCmd(t, "fail", "1", "nope")...)
+
+		if strings.Contains(got.stdout, "Stopped") {
+			t.Errorf("stdout = %q, want no note when nothing was left out", got.stdout)
+		}
+		if !strings.Contains(got.stdout, "Failed:    1") {
+			t.Errorf("summary should keep its three-line shape:\n%s", got.stdout)
+		}
+	})
+
+	t.Run("a skip does not stop the run", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		dirty := f.repo("a")
+		writeFile(t, filepath.Join(dirty, "file.txt"), "uncommitted\n")
+		f.repo("b")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "wip", "--stop-on-failure"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		for _, want := range []string{"Succeeded: 1", "Failed:    0", "Skipped:   1"} {
+			if !strings.Contains(got.stdout, want) {
+				t.Errorf("summary missing %q:\n%s", want, got.stdout)
+			}
+		}
+		if strings.Contains(got.stdout, "Stopped") {
+			t.Errorf("stdout = %q, want the run to carry on past a skip", got.stdout)
+		}
+	})
+
+	// The default is what it was: every repo runs, however many fail.
+	t.Run("without the flag every repo runs", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("a")
+		f.repo("b")
+		f.repo("c")
+
+		got := run(t, &fakePR{}, []string{f.targets, "-b", "wip"}, helperCmd(t, "fail", "1", "nope")...)
+
+		if !strings.Contains(got.stdout, "Failed:    3") {
+			t.Errorf("summary did not count every failure:\n%s", got.stdout)
+		}
+	})
+}
+
+// -k skips cleanup outright rather than skipping only the failures: the repo is
 // left on the branch, ready to carry on in.
 func TestRunKeepBranch(t *testing.T) {
 	t.Parallel()

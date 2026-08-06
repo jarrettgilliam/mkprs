@@ -89,6 +89,7 @@ var flagRows = []struct {
 	{"draft", "d", "", func(c *config) any { return c.draft }},
 	{"keep-branch", "k", "", func(c *config) any { return c.keepBranch }},
 	{"verbose", "v", "", func(c *config) any { return c.verbose }},
+	{"stop-on-failure", "s", "", func(c *config) any { return c.stopOnFailure }},
 }
 
 // flagForms returns every spelling pflag accepts for a flag, as argv fragments.

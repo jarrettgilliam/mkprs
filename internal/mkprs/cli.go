@@ -10,16 +10,17 @@ import (
 
 // config is everything the command line can set.
 type config struct {
-	targetDirs []string
-	branch     string
-	message    string
-	title      string
-	body       string
-	reviewers  string
-	draft      bool
-	keepBranch bool
-	verbose    bool
-	command    []string
+	targetDirs    []string
+	branch        string
+	message       string
+	title         string
+	body          string
+	reviewers     string
+	draft         bool
+	keepBranch    bool
+	verbose       bool
+	stopOnFailure bool
+	command       []string
 }
 
 const usageHead = `Usage: mkprs <target-dir> [<target-dir> ...] -b <branch> [OPTIONS] -- <command> [args...]
@@ -51,7 +52,8 @@ A repo that succeeds or is skipped is returned to the branch it started on and
 mkprs's branch is deleted; -k keeps that branch and leaves the repo on it. A repo
 that fails is never cleaned up -- its branch, commits and any uncommitted edits
 stay exactly as the failure left them, so nothing is lost and the repo itself
-shows which ones need attention.
+shows which ones need attention. The run carries on after a failed repo unless -s
+is given, which stops it there and leaves the remaining repos untouched.
 
 Examples:
   # Bump NuGet dependencies everywhere
@@ -123,6 +125,7 @@ func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
 	fs.BoolVarP(&cfg.draft, "draft", "d", false, "Open the pull requests as drafts")
 	fs.BoolVarP(&cfg.keepBranch, "keep-branch", "k", false, "Leave each repo checked out on the branch instead of deleting it")
 	fs.BoolVarP(&cfg.verbose, "verbose", "v", false, "Stream command output live, prefixed by repo name")
+	fs.BoolVarP(&cfg.stopOnFailure, "stop-on-failure", "s", false, "Stop the run at the first repository that fails")
 	// pflag handles an undeclared --help itself, but only a declared one shows
 	// up in the Options block. Declaring it and raising pflag's own sentinel
 	// keeps both the listing and the standard signal.

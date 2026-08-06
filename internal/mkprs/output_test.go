@@ -120,3 +120,20 @@ func TestSummary(t *testing.T) {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
 }
+
+// A run that stopped early accounts for the repos it never reached, so the
+// counters still add up to the number of repos discovered. The line appears
+// only when there are such repos -- and its label is the longest, so the whole
+// block widens to keep the numbers in one column.
+func TestSummaryCountsReposNotProcessed(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := &reporter{out: &buf, succeeded: 2, failed: 1, skipped: 3, notProcessed: 4}
+	r.summary()
+
+	want := "\n=== Summary ===\nSucceeded:     2\nFailed:        1\nSkipped:       3\nNot processed: 4\n"
+	if got := buf.String(); got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}

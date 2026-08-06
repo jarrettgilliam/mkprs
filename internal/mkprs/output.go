@@ -91,6 +91,13 @@ type reporter struct {
 	out                        io.Writer
 	width                      int
 	succeeded, failed, skipped int
+	// notProcessed is the repos the run never reached, which only -s can
+	// produce. They are counted apart from the skips rather than folded into
+	// them: nothing looked at them, so mkprs cannot say they had nothing to do,
+	// and each of the three counters above matches a line printed above the
+	// summary. Counting them somewhere is what keeps the summary adding up to
+	// the number of repos discovered.
+	notProcessed int
 }
 
 func newReporter(out io.Writer, repos []string) *reporter {
@@ -98,9 +105,20 @@ func newReporter(out io.Writer, repos []string) *reporter {
 }
 
 func (r *reporter) summary() {
+	// "Not processed" is the longest label and usually absent, so the column is
+	// only as wide as the lines actually printed.
+	label := "Succeeded:"
+	if r.notProcessed > 0 {
+		label = "Not processed:"
+	}
+	width := len(label)
+
 	fmt.Fprintln(r.out, "")
 	fmt.Fprintln(r.out, "=== Summary ===")
-	fmt.Fprintf(r.out, "Succeeded: %d\n", r.succeeded)
-	fmt.Fprintf(r.out, "Failed:    %d\n", r.failed)
-	fmt.Fprintf(r.out, "Skipped:   %d\n", r.skipped)
+	fmt.Fprintf(r.out, "%-*s %d\n", width, "Succeeded:", r.succeeded)
+	fmt.Fprintf(r.out, "%-*s %d\n", width, "Failed:", r.failed)
+	fmt.Fprintf(r.out, "%-*s %d\n", width, "Skipped:", r.skipped)
+	if r.notProcessed > 0 {
+		fmt.Fprintf(r.out, "%-*s %d\n", width, "Not processed:", r.notProcessed)
+	}
 }

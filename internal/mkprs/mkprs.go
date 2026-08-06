@@ -94,7 +94,7 @@ func (a *app) run() int {
 
 	// Overlapping targets are an argument mistake with unambiguous intent, so
 	// this deduplicates rather than refusing -- but says so, because silently
-	// discarding an argument someone typed is its own kind of wrong.
+	// discarding an argument someone typed is dishonestly that erodes trust.
 	repos, dropped := dedupeRepos(repos)
 	a.reportIgnored(dropped, "duplicate repository", "duplicate repositories")
 
@@ -105,7 +105,7 @@ func (a *app) run() int {
 
 	rep := newReporter(a.out, repos)
 
-	for _, repoPath := range repos {
+	for i, repoPath := range repos {
 		name := filepath.Base(repoPath)
 		c := newCapture(name, a.cfg.verbose, a.out)
 
@@ -121,6 +121,19 @@ func (a *app) run() int {
 			res = fail("internal error: processRepo returned no outcome", c)
 		}
 		res.report(rep, name)
+
+		// -s is for the run whose command is simply wrong: the first failure is
+		// the diagnosis, and the rest is noise. A skip is a normal result and
+		// stops nothing.
+		if _, broke := res.(outcomeFailed); broke && a.cfg.stopOnFailure {
+			// Why the results end here, with the summary's "Not processed"
+			// counter carrying how many repos that cost.
+			if left := len(repos) - i - 1; left > 0 {
+				fmt.Fprintln(a.out, "Stopped at the first failure.")
+				rep.notProcessed = left
+			}
+			break
+		}
 	}
 
 	rep.summary()
