@@ -63,6 +63,16 @@ stdout carries what mkprs concluded: the `✅`/`⏭️`/`❌` lines, the summary
 `--help` when it was asked for. Errors, discarded-target notices, command capture,
  and all of `--verbose` go to stderr.
 
+## The capture holds the user's workflow, not mkprs's bookkeeping
+
+mkprs automates a manual routine — fetch, branch, run the command, stage, commit,
+push, open the PR — and what those emit is what the user would have seen doing it
+by hand, so it is captured and replayed when one of them fails a repo. What mkprs
+runs to *decide* what to do stays out: the user never typed it, and its failures
+are answers rather than errors. The rule is intent, not a list, so a step added
+later classifies itself. `--verbose` is where both appear, since asking to watch
+mkprs work means watching the bookkeeping too.
+
 ## Execution stays serial
 
 No `-j/--jobs`. Serial is what lets a failure replay its capture as one

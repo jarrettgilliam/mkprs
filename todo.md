@@ -366,11 +366,18 @@ The gaps, in the order they bite:
   the full text anyway. Keeping it would leave a helper whose only reader is a
   rule against reading it.
 
+  The failing command's stderr that the replay needs — see the next bullet — does
+  not bring it back. `gitError` put the text inside `err.Error()`, so every
+  consumer carried it whether or not it wanted it. What replaces it is a value
+  only the replay reads: `fail` gaining a detail argument, or `gitTo` returning
+  the stderr it collected alongside the error.
+
   **`TestGitErrorCarriesStderr` goes with it.** It is the one thing that reads
   the enriched text: stubbing `gitError` to return `err` unchanged fails that
   test and no other, which is what "nothing consumes it" was measured by. Replace
-  it with a test that git's stderr reaches stderr under `-v` — the mechanism is
-  being swapped for a route, so the test should follow the route.
+  it with tests for the two routes that succeed it: git's stderr reaches stderr
+  under `-v`, and a failing `push` or `commit` has its stderr replayed under the
+  `❌` while the reason line beside it stays plain.
 - **`--quiet`/`-q` on the mutating commands.** `checkout -b … --quiet`,
   `commit -q`, `push … --quiet` and `fetch … --quiet` all route through `gitTo`,
   so they would stream — the flag is what silences them. Under `-v` that costs
@@ -383,13 +390,43 @@ The gaps, in the order they bite:
   every internal git command on the same rule as the interrogating helpers above
   — mkprs's own output is either on screen under `-v` or nowhere.
 
-  **Internal git output never enters `c.buf`**, in either mode. The buffer holds
-  the user's command's output and that alone, so a quiet failure still replays
-  everything the command said under its `❌`, exactly as today. What changes is
-  that a failing internal command — `could not commit`, `unable to push` — no
-  longer contributes git's complaint to that replay, since today `--quiet`
-  suppresses its chatter but not its errors. That is the intended trade: the
-  reason line says what mkprs concluded, and `-v` is where the evidence lives.
+  **The workflow's output reaches `c.buf`; bookkeeping's does not.** mkprs
+  automates a manual routine — fetch, cut a branch, run the command, stage,
+  commit, push, open the PR — and those commands' output is output the user would
+  have seen doing it by hand. When one of them fails the repo, its stderr is
+  replayed under the `❌` beside the user's command's own output.
+
+  Everything mkprs runs to *decide* what to do stays out: `config --get
+  remote.origin.url`, `status --porcelain`, `symbolic-ref`, the `rev-parse
+  --verify --quiet` calls, `rev-list --count`, `diff --cached --quiet`. The user
+  never typed those and would not have, and their failures are usually answers
+  rather than errors — `rev-parse --verify --quiet` fails to mean "no such ref",
+  `diff --cached --quiet` exits 1 to mean "there are staged changes".
+
+  Stated this way the rule needs no list to be maintained: a step added later
+  classifies itself. `--tracked-only`'s `add -u`, `--update`'s `checkout
+  <branch>` and its `gh pr view` fallback are all workflow without anyone
+  deciding. `restoreRepo` is the one mutating exception — it is mkprs tidying up
+  after itself rather than anything the user asked for, so it contributes nothing
+  here; see *cleanup can fail silently after a successful run*.
+
+  So this bullet narrows what reaches the replay rather than emptying it.
+  `gitTo` sends both streams to the capture today, and that is worth keeping:
+  `unable to push to origin/<branch>` is the same sentence for a protected
+  branch, a rejected pre-receive hook, an expired credential, a non-fast-forward
+  and an unreachable host, and only `remote: error: GH006: Protected branch
+  update failed` separates them. `-v` is not the answer, because it assumes a
+  re-run — after a batch that pushed twenty repos the state has moved and the
+  evidence is gone.
+
+  **The two questions have different answers.** Under `-v`, everything prints,
+  bookkeeping included, because that is what asking to see mkprs work means. In
+  the quiet-mode replay, only the workflow, because that is what the user would
+  have seen by hand.
+
+  **The reason line stays plain either way.** That is all the `gitError` rule
+  above was protecting, and it is untouched — the complaint is replayed as a block
+  under the `❌`, never folded into the sentence beside it.
 
   Do not reach for `--progress` on fetch/push to force the transfer meter back:
   git suppresses it off a tty for good reason, and it is noise rather than
@@ -475,10 +512,21 @@ method and URL in its place. That inherits the redaction constraint from
 never be built into anything traceable. Worth a test that fixes this at the seam
 rather than a rule to remember.
 
-`ghCLI.open` withholds gh's stdout from the log to avoid printing the PR URL
-twice, and its comment says so. The URL is a result and the log is stderr, so
-there is no longer a double print to avoid — the comment goes, and the reason
-gh's stdout is handled separately becomes redaction alone.
+**Echo gh's stdout to the trace under `-v`**, like every other command's output.
+`ghCLI.open` withholds it today so the PR URL is not printed twice, and its
+comment says so — but that reason expires here. The log becomes stderr while the
+URL is a result on stdout, so the two copies land on different streams: `2>`
+holds it once as gh's output under its `$` line, `1>` holds it once on the `✅`
+line. Only a terminal shows both at once.
+
+gh's stdout also still goes to a buffer, because `lastLine` of it is the return
+value. That has nothing to do with verbosity, and the replacement comment should
+say that instead.
+
+gh's stderr follows the rule above: to stderr under `-v`, and into the replay when
+`failed to create PR` is what fails the repo. `GraphQL: A pull request already
+exists` and `HTTP 403: Resource not accessible by integration` are the whole
+answer, and that reason line can paraphrase neither.
 
 Which means **`prOpener.open` should take the capture rather than an
 `io.Writer`**. Only the implementation knows its own invocation, so only the
@@ -501,7 +549,7 @@ is the right default (tools like `dotnet outdated -u` and scaffolders create
 files), but a command that drops build artifacts in a repo with a thin
 `.gitignore` will commit them. `--tracked-only` stages with `git add -u` instead.
 
-## Repository preflight
+## Repository processing
 
 ### Bug: a failed fetch carries on against stale refs
 
@@ -548,6 +596,42 @@ mkprs writes its own prose into the capture — so there is nothing left there f
 
 **No `--no-fetch` escape hatch.** It would reintroduce every hazard above on
 purpose, and the offline run it implies cannot open a pull request anyway.
+
+### Bug: cleanup can fail silently after a successful run
+
+**High** — a repo left somewhere the user did not put it, under a `✅` that says
+everything went fine.
+
+`restoreRepo` discards both of its errors for `git checkout` and `git branch -D`
+and reports success with no indication that something went wrong.
+
+**It stays `outcomeSuccess`.** Everything the user asked for happened — the
+command ran, the work was committed and pushed, the pull request exists. Cleanup
+is mkprs tidying up after itself, and its failure does not retract any of that.
+Nor does it get a summary counter: the three must keep summing to the repo count,
+and this is not a fourth kind of outcome.
+
+**But say so on stdout, under the repo's result line.** It is a fact about where
+the repo was left, which is what stdout carries, and it is the one thing the user
+has to act on:
+
+```
+✅ acme-web   PR created  https://github.com/acme/web/pull/42
+   left on 'bump-deps'; could not restore 'main'
+```
+
+Terse in quiet mode, naming the branch and what would fix it. The underlying git
+error stays under `-v`, where `restoreRepo`'s output already goes once *Make
+`--verbose` actually verbose* lands — so the two halves need no coordination.
+Same shape as `reportIgnored`, which prints the fact always and the detail only
+under `-v`; unlike that one it is stdout, because a pre-run notice about arguments
+and a conclusion about a repo are not the same kind of line.
+
+**The named result is the seam.** `cleanup` runs in a defer that fires before
+`processRepo` returns, so `defer func() { res = a.cleanup(res, …) }()` lets it
+hand back an annotated outcome — `res` is already named for exactly this reason.
+Skips clean up too, so both `outcomeSuccess` and `outcomeSkipped` can carry the
+note.
 
 ## Command execution
 
