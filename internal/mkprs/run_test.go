@@ -982,6 +982,102 @@ func TestRunDeduplicatesRepos(t *testing.T) {
 	})
 }
 
+// --max-repos is the only thing standing between a mistyped target and a
+// hundred pull requests in other people's repos, so it fails before the first
+// repo is touched -- nothing to undo is the whole point.
+func TestRunMaxRepos(t *testing.T) {
+	t.Parallel()
+
+	t.Run("refuses a run above the limit", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		a := f.repo("a")
+		b := f.repo("b")
+		c := f.repo("c")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "wip", "--max-repos", "2"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if got.code != exitUsage {
+			t.Errorf("exit code = %d, want %d", got.code, exitUsage)
+		}
+		// The message is the fix: the count, the limit, and the flag that
+		// proceeds. Someone reading it should not have to count repos.
+		for _, want := range []string{"found 3 repositories", "--max-repos limit of 2", "re-run with --max-repos 3"} {
+			if !strings.Contains(got.stderr, want) {
+				t.Errorf("stderr missing %q:\n%s", want, got.stderr)
+			}
+		}
+		if len(prs.calls) != 0 {
+			t.Errorf("opened %d PRs, want none", len(prs.calls))
+		}
+		for _, repo := range []string{a, b, c} {
+			if localHasBranch(t, repo, "wip") {
+				t.Errorf("%s was touched despite the limit", filepath.Base(repo))
+			}
+		}
+		if got.stdout != "" {
+			t.Errorf("stdout = %q, want the whole run on stderr", got.stdout)
+		}
+	})
+
+	t.Run("a run at the limit proceeds", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("a")
+		f.repo("b")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "wip", "--max-repos", "2"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if got.code != exitOK {
+			t.Errorf("exit code = %d, want %d\nstderr: %s", got.code, exitOK, got.stderr)
+		}
+		if len(prs.calls) != 2 {
+			t.Errorf("opened %d PRs, want 2", len(prs.calls))
+		}
+	})
+
+	// Counted after dedupeRepos: a repo reached from two targets is one repo, and
+	// should not spend two of the budget.
+	t.Run("counts a repo named twice is counted once", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, repo, "-b", "wip", "--max-repos", "1"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if got.code != exitOK {
+			t.Errorf("exit code = %d, want %d\nstderr: %s", got.code, exitOK, got.stderr)
+		}
+		if len(prs.calls) != 1 {
+			t.Errorf("opened %d PRs, want 1", len(prs.calls))
+		}
+	})
+
+	t.Run("zero disables the limit", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		f.repo("a")
+		f.repo("b")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "wip", "--max-repos", "0"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if got.code != exitOK {
+			t.Errorf("exit code = %d, want %d\nstderr: %s", got.code, exitOK, got.stderr)
+		}
+		if len(prs.calls) != 2 {
+			t.Errorf("opened %d PRs, want 2", len(prs.calls))
+		}
+	})
+}
+
 // By default, a repo's own output is captured, not printed. --verbose streams it
 // live, prefixed with the repo it came from.
 func TestRunOutputVerbosity(t *testing.T) {

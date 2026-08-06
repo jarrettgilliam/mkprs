@@ -20,8 +20,16 @@ type config struct {
 	keepBranch    bool
 	verbose       bool
 	stopOnFailure bool
+	maxRepos      int
 	command       []string
 }
+
+// defaultMaxRepos is a safety net, so it ships on: nobody passes --max-repos on
+// the run where the target turns out to be wrong, because they did not know it
+// was. 50 clears the ~40-repo runs that are the normal case, so the guard stays
+// invisible until something is genuinely wrong -- which is the only way a
+// default like this survives daily use.
+const defaultMaxRepos = 50
 
 const usageHead = `Usage: mkprs <target-dir> [<target-dir> ...] -b <branch> [OPTIONS] -- <command> [args...]
 
@@ -40,6 +48,9 @@ The command runs from the repository root, executed directly rather than through
 a shell -- use ` + "`-- bash -c '...'`" + ` for globs, pipes or redirection. An argument
 that is exactly {} becomes the repo's absolute path, also available as $REPO
 along with $REPO_NAME.
+
+A run that finds more repositories than --max-repos stops before touching any of
+them, so a mistyped target costs nothing; the message says which value proceeds.
 
 Branches are cut from, and PRs opened against, each repo's own default branch,
 whichever branch the repo happens to be on. A repo is skipped when its HEAD is
@@ -126,6 +137,7 @@ func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
 	fs.BoolVarP(&cfg.keepBranch, "keep-branch", "k", false, "Leave each repo checked out on the branch instead of deleting it")
 	fs.BoolVarP(&cfg.verbose, "verbose", "v", false, "Stream command output live, prefixed by repo name")
 	fs.BoolVarP(&cfg.stopOnFailure, "stop-on-failure", "s", false, "Stop the run at the first repository that fails")
+	fs.IntVar(&cfg.maxRepos, "max-repos", defaultMaxRepos, "Refuse to run against more than `n` repositories (0 disables)")
 	// pflag handles an undeclared --help itself, but only a declared one shows
 	// up in the Options block. Declaring it and raising pflag's own sentinel
 	// keeps both the listing and the standard signal.

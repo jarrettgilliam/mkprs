@@ -69,6 +69,11 @@ func (a *app) run() int {
 		return exitOK
 	}
 
+	if err := a.checkRepoCount(len(repos)); err != nil {
+		fmt.Fprintf(a.errw, "Error: %v\n", err)
+		return exitUsage
+	}
+
 	a.processAll(repos)
 	return exitOK
 }
@@ -126,6 +131,23 @@ func (a *app) collectRepos() ([]string, error) {
 	a.reportIgnored(dropped, "duplicate repository", "duplicate repositories")
 
 	return repos, nil
+}
+
+// checkRepoCount is the guard between a mistyped target and a hundred pull
+// requests in other people's repos. It runs before the first repo is touched,
+// because a pull request is not something Ctrl-C takes back.
+//
+// The count is the deduplicated one -- a repo reached from two targets is one
+// repo, and should not spend two of the budget -- and the message is the fix,
+// so the large run that was meant is one flag away and the one that was not is
+// never silent.
+func (a *app) checkRepoCount(found int) error {
+	if a.cfg.maxRepos <= 0 || found <= a.cfg.maxRepos {
+		return nil
+	}
+	return fmt.Errorf(
+		"found %d %s, above the --max-repos limit of %d; re-run with --max-repos %d to proceed",
+		found, plural(found, "repository", "repositories"), a.cfg.maxRepos, found)
 }
 
 // processAll runs every repo in turn and prints the closing summary.

@@ -481,8 +481,8 @@ files), but a command that drops build artifacts in a repo with a thin
 
 ## Discovery & safety limits
 
-The timeout and `--max-repos` are both safety nets, so **both ship with a default
-on**. A limit you have to remember to pass is absent exactly when it matters:
+The timeout is a safety net, so it **ships with a default on**, as `--max-repos`
+does. A limit you have to remember to pass is absent exactly when it matters:
 nobody types `--timeout` on the run where the command turns out to hang, because
 they did not know it would. Opt-out, not opt-in.
 
@@ -500,21 +500,6 @@ returns the error `processRepo` turns into that failure. `--timeout <duration>`
 overrides, `--timeout 0` disables. 10 minutes is chosen to sit well clear of a
 slow-but-real `npm ci` or `dotnet restore` while still catching a wedged process
 the same afternoon; tune it once there is evidence, but do not ship it unset.
-
-### `--max-repos` safety limit, defaulting to 50
-
-**High** — one comparison plus a message, and the only thing between a mistyped
-target and 200 pull requests in other people's repos.
-
-Easy to point this at `~/repos` and accidentally open 200 PRs. Hard-fail before
-any repo is touched if discovery returns more than the cap, and make the message
-the fix: `found 84 repositories, above the --max-repos limit of 50; re-run with
---max-repos 84 to proceed`. 50 clears the ~40-repo runs that are the normal case
-here, so the guard stays invisible until something is genuinely wrong — which is
-the only way a default like this survives contact with daily use. One flag away
-when the large run is intentional, never silent when it is not. Count after
-`dedupeRepos`, which `run` already applies, so a repo reached from two targets
-does not spend two of the budget.
 
 ## Replace `gh` with direct GitHub API calls
 

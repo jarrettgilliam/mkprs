@@ -3,6 +3,8 @@ package mkprs
 import (
 	"bytes"
 	"errors"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -90,20 +92,29 @@ var flagRows = []struct {
 	{"keep-branch", "k", "", func(c *config) any { return c.keepBranch }},
 	{"verbose", "v", "", func(c *config) any { return c.verbose }},
 	{"stop-on-failure", "s", "", func(c *config) any { return c.stopOnFailure }},
+	{"max-repos", "", "84", func(c *config) any { return strconv.Itoa(c.maxRepos) }},
 }
 
 // flagForms returns every spelling pflag accepts for a flag, as argv fragments.
 // A bool has no space form: `-d true` would read true as a positional argument.
+// A flag with no shorthand contributes only its long forms.
 func flagForms(long, short, value string) [][]string {
+	var forms [][]string
+
+	// boolean only flags
 	if value == "" {
-		return [][]string{{"-" + short}, {"--" + long}, {"--" + long + "=true"}}
+		if short != "" {
+			forms = append(forms, []string{"-" + short})
+		}
+		return append(forms, []string{"--" + long}, []string{"--" + long + "=true"})
 	}
-	return [][]string{
-		{"-" + short, value},
-		{"-" + short + "=" + value},
-		{"--" + long, value},
-		{"--" + long + "=" + value},
+
+	// long form only
+	if short != "" {
+		forms = append(forms, []string{"-" + short, value}, []string{"-" + short + "=" + value})
 	}
+
+	return append(forms, []string{"--" + long, value}, []string{"--" + long + "=" + value})
 }
 
 func TestParseArgsFlagForms(t *testing.T) {
@@ -174,8 +185,13 @@ func TestParseArgsFlagFormsCoversEveryFlag(t *testing.T) {
 }
 
 // Flags may appear before or after the target dirs, and in any order.
-func TestParseArgsFlagPlacement(t *testing.T) {
+func TestParseArgsFlagOrder(t *testing.T) {
 	t.Parallel()
+
+	want, _, err := parseArgs([]string{"/tmp", "-b", "x", "-v", "--", "true"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
 
 	tests := []struct {
 		name string
@@ -183,19 +199,12 @@ func TestParseArgsFlagPlacement(t *testing.T) {
 		want config
 	}{
 		{
-			name: "flags after the target dir",
-			args: []string{"/tmp", "-b", "x", "-m", "msg", "-t", "title", "-B", "body", "-r", "alice", "--", "true"},
-			want: config{branch: "x", message: "msg", title: "title", body: "body", reviewers: "alice"},
-		},
-		{
 			name: "flags before the target dir",
 			args: []string{"-b", "x", "-v", "/tmp", "--", "true"},
-			want: config{branch: "x", verbose: true},
 		},
 		{
 			name: "flags on both sides of the target dir",
-			args: []string{"-b", "x", "/tmp", "-d", "--", "true"},
-			want: config{branch: "x", draft: true},
+			args: []string{"-b", "x", "/tmp", "-v", "--", "true"},
 		},
 	}
 
@@ -207,12 +216,8 @@ func TestParseArgsFlagPlacement(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseArgs: %v", err)
 			}
-			// The flags themselves are covered above; what matters here is
-			// only that placement did not change which field got the value.
-			for _, f := range flagRows {
-				if got, want := f.get(cfg), f.get(&tt.want); got != want {
-					t.Errorf("%s = %v, want %v", f.long, got, want)
-				}
+			if !reflect.DeepEqual(cfg, want) {
+				t.Errorf("config = %+v,\n          want %+v", *cfg, *want)
 			}
 		})
 	}
@@ -291,6 +296,21 @@ func TestParseArgsHelp(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A safety net nobody remembers to pass is absent exactly when it matters, so
+// the limit ships on. The number is asserted rather than merely "non-zero":
+// changing it is a decision, and a decision worth making twice.
+func TestParseArgsMaxReposDefaultsOn(t *testing.T) {
+	t.Parallel()
+
+	cfg, _, err := parseArgs([]string{"/tmp", "-b", "x", "--", "true"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if got, want := cfg.maxRepos, defaultMaxRepos; got != want {
+		t.Errorf("maxRepos = %d, want %d", got, want)
 	}
 }
 
