@@ -52,7 +52,7 @@ pushes code it did not create, and would add a lot of complexity for little gain
 
 ## Tests use real `git`, not a faked one
 
-No `gitRunner` interface. `git` is not a boundary but where mkprs's behaviour
+No `gitRunner` interface. `git` is not a boundary but where mkprs's behavior
 lives, and a fake written from the same understanding as the code passes on the
 same wrong understanding. `prOpener` earns its seam because `gh` needs network,
 credentials, and eventually multiple implementations.

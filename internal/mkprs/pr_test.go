@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// ghArgs is where the shell suite's `gh.log` greps ended up. Asserting on the
-// argv directly is both stricter and free of a subprocess.
 func TestGhArgs(t *testing.T) {
 	t.Parallel()
 
@@ -66,8 +64,6 @@ func TestGhArgs(t *testing.T) {
 			},
 		},
 		{
-			// gh prompts interactively without --body, which would hang a batch
-			// run, so it is passed even when empty.
 			name: "empty body is still passed",
 			pr:   pullRequest{Base: "main", Head: "fix", Title: "Fix it"},
 			want: []string{
@@ -79,7 +75,7 @@ func TestGhArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "a non-default base is honoured",
+			name: "a non-default base is honored",
 			pr:   pullRequest{Base: "develop", Head: "fix", Title: "Fix it"},
 			want: []string{
 				"pr", "create",

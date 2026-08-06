@@ -10,10 +10,8 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// Exit codes. A run that merely had failing repos still exits 0: the per-repo
-// result lines and the closing summary carry that information, and scripts that
-// drive mkprs over many repos should not have to treat "one repo's command
-// failed" as a fatal error.
+// Exit codes. A run that merely had failing repos still exits 0: the result
+// lines and the closing summary carry that information.
 const (
 	exitOK    = 0
 	exitUsage = 1
@@ -21,7 +19,7 @@ const (
 
 // app is one run's wiring: what to do, where to write, how to open PRs. It
 // exists so that nothing below Run reaches for os.Stdout, os.Stderr, or the gh
-// binary directly, which is what makes the package testable in-process.
+// binary directly.
 type app struct {
 	cfg  *config
 	out  io.Writer
@@ -29,15 +27,12 @@ type app struct {
 	prs  prOpener
 }
 
-// Run is the whole program: parse, discover, process every repo, report.
-//
-// It returns the process exit code rather than calling os.Exit, so that main is
-// the only place that can end the process.
+// Run is the whole program: parse, discover, process every repo, report. It
+// returns the exit code rather than calling os.Exit, so that main is the only
+// place that can end the process.
 func Run(args []string, stdout, stderr io.Writer) int {
 	cfg, fs, err := parseArgs(args)
 	if err != nil {
-		// Help is a successful request for usage, not a failure, so it goes to
-		// stdout and exits 0. Everything else is a bad invocation.
 		if errors.Is(err, pflag.ErrHelp) {
 			printUsage(stdout, fs)
 			return exitOK
@@ -81,9 +76,6 @@ func (a *app) run() int {
 // prepare checks what can be checked without touching a repo and fills in the
 // values the rest of the run assumes are set.
 func (a *app) prepare() error {
-	// Nothing about this varies per repo, so nothing is learned by asking each
-	// one: git would refuse the name in all of them, after each had been walked
-	// and fetched.
 	if err := validateBranchName(a.cfg.branch); err != nil {
 		return err
 	}
@@ -98,11 +90,8 @@ func (a *app) prepare() error {
 }
 
 // collectRepos expands every target into the deduplicated list of repos to
-// process, accounting for whatever it discards along the way.
-//
-// A target that cannot be interpreted stops the run here, before the first repo
-// is touched -- once pull requests exist, Ctrl-C does not take them back, so
-// everything checkable is checked up front.
+// process, accounting for whatever it discards along the way. A target that
+// cannot be interpreted stops the run before the first repo is touched.
 func (a *app) collectRepos() ([]string, error) {
 	var repos []string
 	var barren []string
@@ -115,9 +104,8 @@ func (a *app) collectRepos() ([]string, error) {
 		}
 
 		// A target that holds no repos is ordinary -- `~/repos/*` sweeps up a
-		// notes/ folder and a README alongside them -- but counting it keeps a
-		// glob that matched nothing useful from looking like a run with nothing
-		// to do.
+		// notes/ folder alongside them -- but counting it keeps a glob that
+		// matched nothing useful from looking like a run with nothing to do.
 		if len(repos) == before {
 			barren = append(barren, dir)
 		}
@@ -125,8 +113,7 @@ func (a *app) collectRepos() ([]string, error) {
 	a.reportIgnored(barren, "target with no repositories", "targets with no repositories")
 
 	// Overlapping targets are an argument mistake with unambiguous intent, so
-	// this deduplicates rather than refusing -- but says so, because silently
-	// discarding an argument someone typed is dishonestly that erodes trust.
+	// this deduplicates rather than refusing -- but reports what it dropped.
 	repos, dropped := dedupeRepos(repos)
 	a.reportIgnored(dropped, "duplicate repository", "duplicate repositories")
 
@@ -135,12 +122,8 @@ func (a *app) collectRepos() ([]string, error) {
 
 // checkRepoCount is the guard between a mistyped target and a hundred pull
 // requests in other people's repos. It runs before the first repo is touched,
-// because a pull request is not something Ctrl-C takes back.
-//
-// The count is the deduplicated one -- a repo reached from two targets is one
-// repo, and should not spend two of the budget -- and the message is the fix,
-// so the large run that was meant is one flag away and the one that was not is
-// never silent.
+// because a pull request is not something Ctrl-C takes back. The message names
+// the value that proceeds, so the large run that was meant is one flag away.
 func (a *app) checkRepoCount(found int) error {
 	if a.cfg.maxRepos <= 0 || found <= a.cfg.maxRepos {
 		return nil
@@ -161,22 +144,17 @@ func (a *app) processAll(repos []string) {
 		res := a.processRepo(repoPath, c)
 		c.flush()
 
-		// Unreachable: every path through processRepo ends in a constructor.
-		// But `return nil` would compile, and calling a method on a nil
-		// interface panics -- a programmer error should not take down a run
-		// that is 20 repos deep. Substituting a failure rather than skipping
-		// keeps the repo in the output and the summary adding up.
+		// Currently unreachable, but an accidental `return nil` would compile
+		// and calling a method on a nil interface panics -- a programmer error
+		// should not take down a run that is 20 repos deep.
 		if res == nil {
 			res = fail("internal error: processRepo returned no outcome", c)
 		}
 		res.report(rep, name)
 
 		// -s is for the run whose command is simply wrong: the first failure is
-		// the diagnosis, and the rest is noise. A skip is a normal result and
-		// stops nothing.
+		// the diagnosis.
 		if _, broke := res.(outcomeFailed); broke && a.cfg.stopOnFailure {
-			// Why the results end here, with the summary's "Not processed"
-			// counter carrying how many repos that cost.
 			if left := len(repos) - i - 1; left > 0 {
 				fmt.Fprintln(a.out, "Stopped at the first failure.")
 				rep.notProcessed = left
@@ -188,11 +166,9 @@ func (a *app) processAll(repos []string) {
 	rep.summary()
 }
 
-// reportIgnored accounts for arguments the run discarded. Discarding one
-// silently is a small dishonesty, but naming each of them is noise on a run
-// where forty repos sit beside three strays -- so the count is always printed
-// and the paths only under --verbose, which is where "why did my glob not match
-// what I expected" gets answered.
+// reportIgnored accounts for arguments the run discarded. Naming each of them
+// is noise on a run where forty repos sit beside three strays, so the count is
+// always printed and the paths only under --verbose.
 func (a *app) reportIgnored(paths []string, one, many string) {
 	n := len(paths)
 	if n == 0 {

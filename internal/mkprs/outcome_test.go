@@ -12,8 +12,6 @@ func testReporter(w io.Writer) *reporter {
 	return &reporter{out: w, width: 8}
 }
 
-// The shell suite spun up real git repos to check these strings. They are pure
-// formatting, so here they are pure tests.
 func TestResultLines(t *testing.T) {
 	t.Parallel()
 
@@ -28,8 +26,6 @@ func TestResultLines(t *testing.T) {
 			want:   "✅ acme-web PR created  https://x/1\n",
 		},
 		{
-			// gh can exit 0 without a parseable URL on stdout. The PR still
-			// exists, so this reports success and simply omits the link.
 			name:   "success without a url",
 			report: func(w *bytes.Buffer) { success("").report(testReporter(w), "acme-web") },
 			want:   "✅ acme-web PR created\n",
@@ -128,7 +124,6 @@ func TestReporterTally(t *testing.T) {
 	}
 }
 
-// Result lines pad to the longest repo name so the status column lines up.
 func TestNameWidthAligns(t *testing.T) {
 	t.Parallel()
 

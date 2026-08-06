@@ -35,7 +35,6 @@ func TestRunOpensPullRequest(t *testing.T) {
 		t.Errorf("pullRequest = %+v, want %+v", call.pr, want)
 	}
 
-	// The change reached the fake GitHub side, on the right branch.
 	if !f.remoteHasBranch("good", "greet") {
 		t.Fatal("branch was not pushed to origin")
 	}
@@ -46,7 +45,6 @@ func TestRunOpensPullRequest(t *testing.T) {
 		t.Errorf("commit subject = %q, want %q", got, want)
 	}
 
-	// The repo is left as it was found.
 	if got := currentBranch(t, repo); got != "main" {
 		t.Errorf("left on branch %q, want main", got)
 	}
@@ -211,9 +209,8 @@ func TestRunCommandThatCommitsItsOwnWork(t *testing.T) {
 		}
 	})
 
-	// Guards against a fix that reaches for --allow-empty: with nothing staged
-	// there is nothing for mkprs to commit, so the command's own commit is the
-	// only one on the branch.
+	// With nothing staged there is nothing for mkprs to commit, so the
+	// command's own commit is the only one on the branch.
 	t.Run("mkprs does not add a commit of its own", func(t *testing.T) {
 		t.Parallel()
 
@@ -498,7 +495,6 @@ func TestRunSkips(t *testing.T) {
 			if !strings.Contains(got.stdout, "Skipped:   1") {
 				t.Errorf("summary did not count the skip:\n%s", got.stdout)
 			}
-			// A skipped repo is left exactly as it was found.
 			if got := currentBranch(t, repo); got != "main" {
 				t.Errorf("left on branch %q, want main", got)
 			}
@@ -637,8 +633,8 @@ func TestRunFailures(t *testing.T) {
 }
 
 // -s/--stop-on-failure is about the repos after the failure: when the command
-// itself is wrong, one repo's worth of output is the diagnosis and twenty-nine
-// more is noise. A skip is a normal result and does not stop anything.
+// itself is wrong, one repo's worth of output is the diagnosis and the rest is
+// noise. A skip is a normal result and does not stop anything.
 func TestRunStopOnFailure(t *testing.T) {
 	t.Parallel()
 
@@ -845,9 +841,8 @@ func TestRunMultipleReposAndDirs(t *testing.T) {
 	}
 }
 
-// A bad target stops the run before any repo is touched. It used to warn and
-// carry on, which meant the other targets went ahead and opened pull requests
-// that Ctrl-C could not take back.
+// A bad target stops the run before any repo is touched: carrying on would let
+// the other targets open pull requests that Ctrl-C cannot take back.
 func TestRunRejectsABadTargetDir(t *testing.T) {
 	t.Parallel()
 
@@ -931,9 +926,9 @@ func TestRunVerboseListsIgnoredTargets(t *testing.T) {
 	}
 }
 
-// Overlapping targets used to process a repo twice: the first pass opened the
-// PR, the second skipped with `branch 'b' already exists on origin`, and the
-// summary reported two outcomes for one repo.
+// Overlapping targets name the same repo once. Processing it twice would open
+// the PR on the first pass, skip on the second with `branch 'b' already exists
+// on origin`, and report two outcomes for one repo.
 func TestRunDeduplicatesRepos(t *testing.T) {
 	t.Parallel()
 
@@ -957,7 +952,6 @@ func TestRunDeduplicatesRepos(t *testing.T) {
 			t.Errorf("summary missing %q:\n%s", want, got.stdout)
 		}
 	}
-	// Silently discarding an argument someone typed is a small dishonesty.
 	if !strings.Contains(got.stderr, "Ignored 1 duplicate repository.") {
 		t.Errorf("stderr = %q, want the duplicate to be reported", got.stderr)
 	}
@@ -1143,9 +1137,9 @@ func TestRunOutputVerbosity(t *testing.T) {
 	})
 }
 
-// A failure is the one place the whole capture is replayed, since there is no
-// --log to read it from. Nothing is truncated and nothing is held back -- not
-// even the PR opener's output, which used to be visible only in the log file.
+// A failure is the one place the whole capture is replayed, and there is
+// nowhere else to read it from. Nothing is truncated and nothing is held back,
+// the PR opener's own output included.
 func TestRunFailuresExplainThemselves(t *testing.T) {
 	t.Parallel()
 
@@ -1165,8 +1159,6 @@ func TestRunFailuresExplainThemselves(t *testing.T) {
 		}
 	})
 
-	// A long failure is replayed in full: truncating it would put the useful
-	// part out of reach now that there is nowhere else to look.
 	t.Run("long output is not truncated", func(t *testing.T) {
 		t.Parallel()
 
@@ -1182,8 +1174,7 @@ func TestRunFailuresExplainThemselves(t *testing.T) {
 		}
 	})
 
-	// The gap this change closed: a PR failure used to say only "failed to
-	// create PR", with the opener's explanation reachable only via --log.
+	// "failed to create PR" on its own says nothing about why.
 	t.Run("the PR opener's output is shown", func(t *testing.T) {
 		t.Parallel()
 
@@ -1201,7 +1192,7 @@ func TestRunFailuresExplainThemselves(t *testing.T) {
 		}
 	})
 
-	// ...and under --verbose it streams live instead, rather than vanishing.
+	// ...and under --verbose it streams live instead.
 	t.Run("the PR opener's output streams under verbose", func(t *testing.T) {
 		t.Parallel()
 
@@ -1240,22 +1231,13 @@ func TestRunSummaryCountsEveryState(t *testing.T) {
 // =============================================================================
 // The pieces of processRepo, tested directly
 //
-// Everything above drives a whole run, which is the only way to test a step
-// that lives inside a 127-line function. These have one exit each, so they can
-// be called on their own -- and the cases that are awkward to stage as a repo
-// become rows in a table.
-//
-// The tests above are what is left once that is possible: the wiring, the
-// reporting, and the interactions between steps. A condition that only decides
-// one step's answer belongs down here, where it costs a fixture instead of a
-// full run.
+// The tests above drive a whole run: the wiring, the reporting, and the
+// interactions between steps. A condition that only decides one step's answer
+// belongs down here, where it costs a fixture instead of a full run.
 // =============================================================================
 
-// {} substitution was reachable only through TestRunCommandContext, which
-// builds a repo, runs a command and reads the pushed commit back to prove a
-// loop over strings works. These rows cost nothing, and two of them -- {} twice
-// over, and {} inside a larger argument -- are cases no single command line can
-// stage.
+// Two of these rows -- {} twice over, and {} inside a larger argument -- are
+// cases no single command line can stage.
 func TestExpandCommand(t *testing.T) {
 	t.Parallel()
 
@@ -1312,8 +1294,6 @@ func TestExpandCommand(t *testing.T) {
 func TestPreflight(t *testing.T) {
 	t.Parallel()
 
-	// What is only visible here is the data return: a repo that passes hands
-	// back three names that are all distinct from one another.
 	t.Run("a repo that passes", func(t *testing.T) {
 		t.Parallel()
 
@@ -1339,14 +1319,9 @@ func TestPreflight(t *testing.T) {
 		}
 	})
 
-	// Every way a repo can stop here. These used to be rows in TestRunSkips,
-	// each paying for a whole run -- discovery, a command, a fake PR opener --
-	// to reach a decision made before any of that happens. TestRunSkips keeps
-	// one, since how a skip is reported does not vary by reason.
-	//
-	// Being one table is also what makes the set legible: "could not determine
-	// default branch" had no test at all, and its absence was invisible while
-	// these were scattered.
+	// Every way a repo can stop here, in one table so the set stays legible.
+	// How a skip is then reported does not vary by reason, which is what
+	// TestRunSkips covers with a single row.
 	stops := []struct {
 		name  string
 		setup func(t *testing.T, f *fixture) string // returns the repo path
@@ -1452,9 +1427,7 @@ func TestPreflight(t *testing.T) {
 	}
 }
 
-// cleanup used to be a deferred closure that could only be reached by making a
-// repo end each way for real. The rule it encodes is small enough to state as a
-// table: restore unless the repo failed or -k was passed.
+// cleanup's rule in one table: restore unless the repo failed or -k was passed.
 func TestCleanup(t *testing.T) {
 	t.Parallel()
 
@@ -1526,11 +1499,6 @@ func TestCleanup(t *testing.T) {
 
 // The command sees the repo as its working directory, its path via {} and
 // $REPO, and its name via $REPO_NAME.
-//
-// Each row used to be a whole run -- discover, cut a branch, commit, push, open
-// a PR -- with the value read back out of a commit on the fake remote, all to
-// find out what one environment variable held. runCommand is that step on its
-// own, so the file can be read where the command wrote it.
 func TestRunCommandContext(t *testing.T) {
 	t.Parallel()
 
@@ -1580,10 +1548,8 @@ func TestRunCommandContext(t *testing.T) {
 	}
 }
 
-// runCommand is the one step mkprs does not control the behaviour of, so what
-// is worth pinning is the boundary around it: where it runs, what it can see,
-// and what comes back when it goes wrong. The context is the table above; these
-// are the failure shapes, which never write a file at all.
+// These are the failure shapes, which never write a file at all. What the
+// command can see is the table above.
 func TestRunCommand(t *testing.T) {
 	t.Parallel()
 

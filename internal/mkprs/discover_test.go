@@ -89,8 +89,6 @@ func TestDiscoverRepos(t *testing.T) {
 		assertEqualSlice(t, "repos", repos, []string{a, b})
 	})
 
-	// Order is lexical rather than filesystem-dependent, which is what makes
-	// log-file collision suffixing deterministic.
 	t.Run("returns repos in lexical order", func(t *testing.T) {
 		t.Parallel()
 
@@ -154,9 +152,7 @@ func TestDiscoverRepos(t *testing.T) {
 	})
 }
 
-// A target mkprs cannot interpret stops the run before any repo is touched.
-// These used to warn and carry on, which is exactly what scrolls past while the
-// other forty targets are busy opening pull requests.
+// A target mkprs cannot interpret stops the run before any repo is touched
 func TestDiscoverReposRejectsBadTargets(t *testing.T) {
 	t.Parallel()
 
@@ -219,7 +215,7 @@ func TestDiscoverReposRejectsBadTargets(t *testing.T) {
 	}
 
 	// The repo root itself is found by the walk, so the inside-a-repo check
-	// never runs for it. Guards against a fix that rejects the ordinary case.
+	// never runs for it.
 	t.Run("a repo root is not inside a repo", func(t *testing.T) {
 		t.Parallel()
 

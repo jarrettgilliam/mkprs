@@ -208,7 +208,7 @@ func TestDefaultBranch(t *testing.T) {
 		}
 	})
 
-	t.Run("honours a non-main default", func(t *testing.T) {
+	t.Run("honors a non-main default", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)

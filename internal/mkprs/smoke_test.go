@@ -16,8 +16,8 @@ import (
 // gh is mocked at the interface, and that mock cannot reach a subprocess.
 
 // buildBinary compiles mkprs into the test's own temp dir and returns its path.
-// Each caller builds its own copy: the build cache makes a warm rebuild ~0.2s,
-// which is cheaper than the process-wide setup that sharing one would need.
+// Each caller builds its own copy: the build cache keeps a warm rebuild cheap,
+// and sharing one would need process-wide setup.
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {

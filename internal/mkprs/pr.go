@@ -20,8 +20,7 @@ type pullRequest struct {
 }
 
 // prOpener opens a pull request and returns its URL. Everything the attempt
-// emits is written to log, which ends up in the repo's capture. This is the
-// seam that lets the gh CLI be swapped for direct API calls.
+// emits is written to log, which ends up in the repo's capture.
 type prOpener interface {
 	open(repoPath string, pr pullRequest, log io.Writer) (string, error)
 }
@@ -53,8 +52,8 @@ func (ghCLI) open(repoPath string, pr pullRequest, log io.Writer) (string, error
 		return "", fmt.Errorf("'gh' (GitHub CLI) is not installed")
 	}
 
-	// gh prints the PR URL on stdout; that URL is the success line, so it is
-	// deliberately not echoed into log -- doing so would print it twice.
+	// gh prints the PR URL on stdout. That URL is the success line, so it is
+	// deliberately not echoed into log, which would print it twice.
 	var stdout bytes.Buffer
 	cmd := exec.Command("gh", ghArgs(pr)...)
 	cmd.Dir = repoPath

@@ -4,14 +4,11 @@ import "fmt"
 
 // outcome is the closed set of ways a repo can end up. A skip is a normal
 // result (dirty tree, nothing to do), not an error, hence three states rather
-// than an error and its absence.
-//
-// Each variant renders and counts itself, so nothing outside has to know which
-// one it is holding. Each constructor requires the data its variant carries, so
-// a skip without a reason cannot be built.
+// than an error and its absence. Each variant renders and counts itself, so
+// nothing outside has to know which one it is holding.
 type outcome interface {
-	// report renders this result and counts it. It is also what seals the
-	// interface: unexported, so no type outside this package can implement it.
+	// report renders this result and counts it. Unexported, so no type outside
+	// this package can implement outcome.
 	report(r *reporter, name string)
 }
 
@@ -21,9 +18,8 @@ type outcomeSkipped struct{ reason string }
 
 type outcomeFailed struct {
 	reason string
-	// c is the repo's output, replayed under the ❌ line. Nothing writes to it
-	// after this outcome is built: a failure skips cleanup, so the capture is
-	// complete by the time the caller reports.
+	// c is the repo's output, replayed under the ❌ line. A failure skips
+	// cleanup, so nothing writes to it after this outcome is built.
 	c *capture
 }
 

@@ -18,7 +18,7 @@ the second axis.
    inside a feature item still counts: its own band, its own line, done first.
    Security issues go first among those.
 2. **Prerequisites above what they unblock.**
-3. **Value against effort, for everything left.** The middle is judgement, and
+3. **Value against effort, for everything left.** The middle is judgment, and
    the line under each heading records it so it can be disagreed with.
 4. **Safety nets outrank their size.** They bound a failure that lands in other
    people's repositories.
@@ -45,14 +45,21 @@ when they are added; an item with no band is one nobody has decided about yet.
 - Use red/green test driven development (TDD). Write failing tests first, then
   make them pass. This validates the test works as it should, while also clearly
   defining behavior before writing the implementation.
+- Comments earn their place by explaining *why*, and only where a reader would
+  otherwise get it wrong — name the plausible alternative and why it lost. Don't
+  restate the code, the test name, the assertion below it, or what
+  [`design-notes.md`](design-notes.md) and the usage text already say. No
+  historical narrative: what the code used to do is git's job, not a comment's.
 - Work on a single item at a time.
 - If you have any questions that this file or source code doesn't clarify, ask.
   Don't make assumptions.
 - When finished, update this file — completed items are deleted rather than
   marked done — then stop. I'll review, commit, and push before work starts on
   the next feature.
-- Do not add to [`design-notes.md`](design-notes.md). These notes are
-  architectural decisions that drive this TODO list. It's not a changelog.
+- Edit [`design-notes.md`](design-notes.md) only when a standing truth is
+  discovered or changes, or to fix spelling and grammar — completing a feature
+  is not a reason, and the file's own header explains why. If a note looks
+  wrong, say so rather than quietly rewriting it.
 
 ## Flags & UX
 
@@ -462,7 +469,7 @@ Which means **`prOpener.open` should take the capture rather than an
 `io.Writer`**. Only the implementation knows its own invocation, so only the
 implementation can narrate it, and a plain writer gives it no way to distinguish
 a trace line from the output it is narrating. Handing it the capture puts the
-redaction constraint on the side of the seam that can actually honour it. The
+redaction constraint on the side of the seam that can actually honor it. The
 alternative — `openPR` calling `ghArgs` itself to trace before delegating — leaks
 gh's argv into the caller that exists to not know about gh.
 
@@ -478,6 +485,32 @@ lines land in one place.
 is the right default (tools like `dotnet outdated -u` and scaffolders create
 files), but a command that drops build artifacts in a repo with a thin
 `.gitignore` will commit them. `--tracked-only` stages with `git add -u` instead.
+
+## Command execution
+
+### Bug: `runCommand` reports an exit code the command never had
+
+**High** — a failure line that names the wrong cause, fixed in one function.
+
+`exitCode` (`run.go`) falls back to 127 for any error that is not an
+`*exec.ExitError`. Nothing produces that number: 127 is a shell convention, and
+mkprs never goes through a shell — `exec.Command` does its own `LookPath` and
+`execve`, so a missing binary arrives as `*exec.Error` wrapping `fs.ErrNotExist`
+with no exit status at all. The fallback invents one.
+
+Two things go wrong from that. Every non-`ExitError` failure is reported as if
+the command were not found: `cmd.Dir` missing, the binary not executable, fork
+failing, or the `capture` returning a write error mid-stream all print
+`command exited 127`, and the underlying error text — the only thing that would
+explain any of them — is dropped. Separately, `ee.ExitCode()` is -1 for a process
+killed by a signal, so an OOM-killed command prints `command exited -1`, which is
+not a status any shell would report.
+
+Keep the real status when there is one, and report the real error when there is
+not: `command exited %d` for a non-negative code, the signal for a negative one,
+and `could not run command: %w` otherwise. `exitCode` and `exitCommandNotFound`
+both go. The "a command that cannot start" test (`run_test.go`) pins the invented
+127 and its comment argues for it, so both change with the code.
 
 ## Discovery & safety limits
 
@@ -595,7 +628,7 @@ reads the *un-rewritten* config value, which is what makes this parseable.
 - `422` usually means a PR already exists for that head. That is a skip, not a
   failure — better than the current opaque `failed to create PR`.
 - Back off on `5xx` and on secondary rate limits, which arrive as **`403` or
-  `429`** — both, since GitHub uses either. Honour `Retry-After` when it is
+  `429`** — both, since GitHub uses either. Honor `Retry-After` when it is
   present and fall back to exponential backoff when it is not. A 30-repo run
   trips these.
 
@@ -609,7 +642,7 @@ Keeping both would serve nobody: token source 2 is `gh auth token`, so every use
 with a working `gh` already hands `restAPI` a valid token. The only users left
 over are ones where `gh pr create` works but `gh auth token` will not print — and
 paying for that with two code paths costs real things. The two would disagree on
-behaviour (`422` is a skip and a failed reviewer is a warning on the REST path;
+behavior (`422` is a skip and a failed reviewer is a warning on the REST path;
 `ghCLI` collapses both into `failed to create PR`), so what a user sees would
 depend on their environment. The redaction rule above would need getting right
 twice, once for argv and once for method + URL. And a fallback that only fires in

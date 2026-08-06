@@ -23,12 +23,12 @@ func newCapture(name string, verbose bool, out io.Writer) *capture {
 	return &capture{name: name, verbose: verbose, out: out}
 }
 
-// Write makes capture an io.Writer, which is what lets it be handed straight to
+// Write makes capture an io.Writer, so it can be handed straight to
 // exec.Cmd.Stdout. The error is always nil, and callers may ignore it: the
 // buffer cannot fail, and a broken stdout is not a reason to abandon a repo's
 // command mid-run.
 func (c *capture) Write(p []byte) (int, error) {
-	c.buf.Write(p) // documented never to fail
+	c.buf.Write(p)
 	if !c.verbose {
 		return len(p), nil
 	}
@@ -45,8 +45,6 @@ func (c *capture) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// flush emits a trailing fragment that never got its newline. Without this the
-// last line of output from a command that doesn't end in \n is lost.
 func (c *capture) flush() {
 	if c.verbose && len(c.pending) > 0 {
 		fmt.Fprintf(c.out, "[%s] %s\n", c.name, c.pending)
@@ -91,12 +89,10 @@ type reporter struct {
 	out                        io.Writer
 	width                      int
 	succeeded, failed, skipped int
-	// notProcessed is the repos the run never reached, which only -s can
-	// produce. They are counted apart from the skips rather than folded into
-	// them: nothing looked at them, so mkprs cannot say they had nothing to do,
-	// and each of the three counters above matches a line printed above the
-	// summary. Counting them somewhere is what keeps the summary adding up to
-	// the number of repos discovered.
+	// notProcessed counts the repos the run never reached, which only -s can
+	// produce. They are counted apart from the skips -- nothing looked at them,
+	// so mkprs cannot say they had nothing to do -- but counted, so the summary
+	// adds up to the number of repos discovered.
 	notProcessed int
 }
 

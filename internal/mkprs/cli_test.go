@@ -26,8 +26,8 @@ func TestParseArgsUsageErrors(t *testing.T) {
 		{"unknown flag", []string{"/tmp", "--bogus"}, "unknown flag"},
 		{"missing flag value", []string{"/tmp", "-b"}, "needs an argument"},
 		// pflag takes whatever follows a flag as its value, so a flag left
-		// empty eats the -- separator. That used to surface as "no command
-		// specified", which points at the wrong end of the line.
+		// empty eats the -- separator. Without the guard this reports "no
+		// command specified", pointing at the wrong end of the line.
 		{"separator taken as a flag value", []string{"/tmp", "-b", "--", "true"}, `-b/--branch needs an argument: "--" is the command separator`},
 	}
 
@@ -70,14 +70,9 @@ func TestParseArgsKeepsValuesStartingWithDashDash(t *testing.T) {
 	}
 }
 
-// The four flag-spelling tests in the shell suite each built a repo and ran a
-// whole PR flow to prove a string was parsed. Here they are one table -- and one
-// row per flag rather than per spelling, so covering both forms of a flag is not
-// something anyone has to remember to do.
-//
-// pflag does the parsing and needs no help being trusted. What this catches is
-// the wiring: a typo in a long name, or a short and long pair pointed at
-// different fields.
+// One row per flag rather than per spelling. pflag does the parsing; what
+// this catches is the wiring: a typo in a long name, or a short and long pair
+// pointed at different fields.
 var flagRows = []struct {
 	long, short string
 	value       string // empty for a bool
@@ -299,9 +294,7 @@ func TestParseArgsHelp(t *testing.T) {
 	}
 }
 
-// A safety net nobody remembers to pass is absent exactly when it matters, so
-// the limit ships on. The number is asserted rather than merely "non-zero":
-// changing it is a decision, and a decision worth making twice.
+// The limit ships on. The number is asserted rather than merely "non-zero".
 func TestParseArgsMaxReposDefaultsOn(t *testing.T) {
 	t.Parallel()
 

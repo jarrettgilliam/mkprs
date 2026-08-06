@@ -25,10 +25,8 @@ type config struct {
 }
 
 // defaultMaxRepos is a safety net, so it ships on: nobody passes --max-repos on
-// the run where the target turns out to be wrong, because they did not know it
-// was. 50 clears the ~40-repo runs that are the normal case, so the guard stays
-// invisible until something is genuinely wrong -- which is the only way a
-// default like this survives daily use.
+// the run where the target turns out to be wrong. Set well above an ordinary
+// run, so the guard stays invisible until something is genuinely wrong.
 const defaultMaxRepos = 50
 
 const usageHead = `Usage: mkprs <target-dir> [<target-dir> ...] -b <branch> [OPTIONS] -- <command> [args...]
@@ -49,22 +47,22 @@ a shell -- use ` + "`-- bash -c '...'`" + ` for globs, pipes or redirection. An 
 that is exactly {} becomes the repo's absolute path, also available as $REPO
 along with $REPO_NAME.
 
-A run that finds more repositories than --max-repos stops before touching any of
-them, so a mistyped target costs nothing; the message says which value proceeds.
+The --max-repos limit is checked before any repo is touched, so a mistyped target
+costs nothing; the message says which value proceeds.
 
 Branches are cut from, and PRs opened against, each repo's own default branch,
-whichever branch the repo happens to be on. A repo is skipped when its HEAD is
-detached, its working tree is dirty, the branch already exists, the command
-leaves no changes behind, or origin is not a GitHub remote. The command must
-leave the repo on the branch mkprs created -- one that switches branches fails
-that repo, leaving its work in place.
+regardless of which branch the repo happens to be on. A repo is skipped when
+its HEAD is detached, its working tree is dirty, the branch already exists, the
+command leaves no changes behind, or origin is not a GitHub remote. The command
+must leave the repo on the branch mkprs created -- one that switches branches
+fails that repo, leaving its work in place.
 
 A repo that succeeds or is skipped is returned to the branch it started on and
-mkprs's branch is deleted; -k keeps that branch and leaves the repo on it. A repo
-that fails is never cleaned up -- its branch, commits and any uncommitted edits
-stay exactly as the failure left them, so nothing is lost and the repo itself
-shows which ones need attention. The run carries on after a failed repo unless -s
-is given, which stops it there and leaves the remaining repos untouched.
+mkprs's branch is deleted; -k opts out. A repo that fails is never cleaned up:
+its branch, commits and any uncommitted edits stay exactly as the failure left
+them, so nothing is lost and the repo itself shows which ones need attention.
+The run carries on after a failed repo unless -s is given, which leaves the
+remaining repos untouched.
 
 Examples:
   # Bump NuGet dependencies everywhere
@@ -90,18 +88,16 @@ func printUsage(w io.Writer, fs *pflag.FlagSet) {
 }
 
 // checkFlagValues rejects a flag that has swallowed the `--` separator. pflag
-// takes whatever follows a flag as its value with no guard of its own, so
-// `mkprs tgt -b -- true` sets the branch to "--", leaves the command empty, and
-// reports "no command specified" -- a message about the far end of the line from
-// the mistake.
+// takes whatever follows a flag as its value, so `mkprs tgt -b -- true` sets
+// the branch to "--", leaves the command empty, and reports "no command
+// specified" -- a message about the far end of the line from the mistake.
 //
 // The test is equality, not a `--` prefix: only `--` exactly can be the
-// separator, and a value that merely begins with one is a value. `-m`, `-t` and
-// `-B` are free text and this has no business editing what they may say.
+// separator, and a value that merely begins with one is a value.
 func checkFlagValues(fs *pflag.FlagSet) error {
 	var err error
-	// Visit covers only the flags actually set, in name order -- so with more
-	// than one offender the message is at least deterministic.
+	// Visit covers only the flags actually set, in the order they were given,
+	// so with more than one offender the message is at least deterministic.
 	fs.Visit(func(f *pflag.Flag) {
 		if err != nil || f.Value.Type() == "bool" {
 			return
@@ -115,17 +111,15 @@ func checkFlagValues(fs *pflag.FlagSet) error {
 
 // parseArgs builds the config from argv, returning the flag set alongside it so
 // the caller can render usage. Problems come back as errors -- deciding which
-// stream to print on, and whether to exit, is the command's job.
-//
-// -h/--help comes back as pflag.ErrHelp. It is not a failure: the caller prints
-// usage to stdout and exits 0. Every other error is a bad invocation.
+// stream to print on, and whether to exit, is the command's job. -h/--help
+// comes back as pflag.ErrHelp.
 func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
 	cfg := &config{}
 
 	fs := pflag.NewFlagSet("mkprs", pflag.ContinueOnError)
 	fs.SortFlags = false
-	// ContinueOnError still prints the error and usage on its own way out.
-	// Discarding that leaves parseArgs a pure function of its arguments.
+	// ContinueOnError still prints the error and usage on its own way out;
+	// discarding that leaves parseArgs a pure function of its arguments.
 	fs.SetOutput(io.Discard)
 
 	fs.StringVarP(&cfg.branch, "branch", "b", "", "Branch `name` to create in each repo (required)")
@@ -138,12 +132,8 @@ func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
 	fs.BoolVarP(&cfg.verbose, "verbose", "v", false, "Stream command output live, prefixed by repo name")
 	fs.BoolVarP(&cfg.stopOnFailure, "stop-on-failure", "s", false, "Stop the run at the first repository that fails")
 	fs.IntVar(&cfg.maxRepos, "max-repos", defaultMaxRepos, "Refuse to run against more than `n` repositories (0 disables)")
-	// pflag handles an undeclared --help itself, but only a declared one shows
-	// up in the Options block. Declaring it and raising pflag's own sentinel
-	// keeps both the listing and the standard signal.
 	help := fs.BoolP("help", "h", false, "Show this help message")
 
-	// pflag's own wording ("unknown flag: --bogus") is kept as-is.
 	if err := fs.Parse(args); err != nil {
 		return nil, fs, err
 	}

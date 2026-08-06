@@ -18,11 +18,9 @@ import (
 // =============================================================================
 
 // helperFlag marks a re-execution of the test binary as the command under test
-// rather than as the test suite.
-//
-// Every fixture used to run `bash -c '...'`, which does not exist on Windows.
-// Re-executing ourselves is the stdlib's own idiom (see os/exec's tests): it
-// needs no shell, no PATH manipulation, and behaves identically everywhere.
+// rather than as the test suite. Re-executing ourselves is the stdlib's own
+// idiom (see os/exec's tests): it needs no shell, no PATH manipulation, and
+// behaves identically everywhere, including on Windows.
 const helperFlag = "-mkprs.helper"
 
 func TestMain(m *testing.M) {
@@ -78,8 +76,7 @@ func isolateGit() (func(), error) {
 	return func() { _ = os.RemoveAll(dir) }, nil
 }
 
-// runHelper is the command under test. Modes cover what the shell fixtures used
-// to express as `bash -c '...'`.
+// runHelper is the command under test, one mode per behavior a fixture needs.
 func runHelper(args []string) int {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "helper: no mode")

@@ -16,8 +16,6 @@ func TestNameWidthMinimum(t *testing.T) {
 func TestCaptureIndented(t *testing.T) {
 	t.Parallel()
 
-	// Nothing is truncated: with --log gone this replay is the only place a
-	// failure's output can be read.
 	t.Run("keeps every line", func(t *testing.T) {
 		t.Parallel()
 
@@ -121,10 +119,8 @@ func TestSummary(t *testing.T) {
 	}
 }
 
-// A run that stopped early accounts for the repos it never reached, so the
-// counters still add up to the number of repos discovered. The line appears
-// only when there are such repos -- and its label is the longest, so the whole
-// block widens to keep the numbers in one column.
+// The line appears only when there are repos the run never reached, and its
+// label is the longest, so the whole block widens with it.
 func TestSummaryCountsReposNotProcessed(t *testing.T) {
 	t.Parallel()
 

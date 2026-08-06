@@ -8,10 +8,8 @@ import (
 	"strings"
 )
 
-// gitCommand builds a git invocation rooted at repoPath. Every helper below
-// starts here, so one place knows how git is run and the helpers differ only in
-// what they do with the two streams -- which is the whole distinction between
-// them.
+// gitCommand builds a git invocation rooted at repoPath. The helpers below all
+// start here and differ only in what they do with the two streams.
 func gitCommand(repoPath string, args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
@@ -61,18 +59,14 @@ func gitError(err error) error {
 }
 
 // validateBranchName rejects a name git would refuse, so that one bad -b is one
-// message at startup rather than the same failure in every repo.
+// message at startup rather than the same failure in every repo. The rules are
+// git's own, via check-ref-format, so they cannot drift from what git enforces.
 //
-// The rules are git's own and stay that way: check-ref-format is a pure string
-// check needing no repo and no network, and it covers spaces, "..", a .lock
-// suffix, a trailing "." or "/", "@{" and control characters. Restating that
-// list here would drift from what git enforces, and silently.
-//
-// The leading dash is the exception, and has to be tested separately: git's
-// "cannot begin with a dash" rule lives in its branch-name path (`git branch --
-// -foo` refuses) and not in check-ref-format, which exits 0 for
-// refs/heads/--draft. That is also the case this whole check exists for -- a
-// flag left without its value, as in `mkprs ~/repos -b --draft -- true`.
+// The leading dash has to be tested separately: git's "cannot begin with a
+// dash" rule lives in its branch-name path and not in check-ref-format, which
+// exits 0 for refs/heads/--draft. That is also the case this check mainly
+// exists for -- a flag left without its value, as in `mkprs ~/repos -b --draft
+// -- true`.
 func validateBranchName(branch string) error {
 	// check-ref-format reads only its argument, so there is no repo to run it
 	// in; the empty path leaves cmd.Dir unset, i.e. the process's own cwd.
@@ -164,11 +158,8 @@ func headBranch(repoPath string) (string, bool) {
 }
 
 // branchAhead reports whether branch carries commits that base does not, and
-// whether the question could be answered at all.
-//
-// This is what decides that a repo has something to open a PR for. A commit the
-// command made itself counts exactly as much as one mkprs made, which is why
-// this asks about the branch rather than about the index.
+// whether the question could be answered at all. This is what decides that a
+// repo has something to open a PR for.
 func branchAhead(repoPath, base, branch string) (ahead, ok bool) {
 	out, err := git(repoPath, "rev-list", "--count", base+".."+branch)
 	if err != nil {
@@ -177,15 +168,13 @@ func branchAhead(repoPath, base, branch string) (ahead, ok bool) {
 	return out != "0", true
 }
 
-// restoreRepo abandons the working branch and returns the repo to startBranch,
-// whatever was checked out before mkprs cut its own. The checkout and the delete
-// go together on purpose: checking out with the command's uncommitted edits
-// still in the tree can carry them across, which would leave those edits
-// stranded on startBranch after the branch that explains them is gone. Callers
-// that do not want the branch deleted must not call this at all.
+// restoreRepo abandons the working branch and returns the repo to startBranch.
+// The checkout and the delete go together on purpose: checking out with the
+// command's uncommitted edits still in the tree can carry them across, leaving
+// those edits stranded on startBranch after the branch that explains them is
+// gone. Callers that do not want the branch deleted must not call this at all.
 func restoreRepo(repoPath, startBranch, branch string, w io.Writer) {
 	_ = gitTo(repoPath, w, "checkout", startBranch, "--quiet")
-	// Matches the original's `git branch -D ... >/dev/null`: the "Deleted
-	// branch" line is noise, but errors still belong in the capture.
+	// The "Deleted branch" line is noise, but errors belong in the capture.
 	_ = gitErrTo(repoPath, w, "branch", "-D", branch)
 }
