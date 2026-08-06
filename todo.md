@@ -166,14 +166,14 @@ Pure git, no query to GitHub. Local and remote here mean `refs/heads/<branch>`
 and `refs/remotes/origin/<branch>` after `preflight`'s existing
 `fetch --prune`:
 
-| Row | Local Branch Exists | Remote Branch Exists | Branches on same commit?   | Continue? |
-| --- | ------------------- | -------------------- | -------------------------- | --------- |
-|   1 | Y                   | Y                    | Yes                        | Yes       |
-|   2 | Y                   | Y                    | No                         | No        |
-|   3 | Y                   | N                    | Same as the default branch | Yes       |
-|   4 | Y                   | N                    | Different from default     | No        |
-|   5 | N                   | Y                    | N/A                        | Yes       |
-|   6 | N                   | N                    | N/A                        | Yes       |
+| Row | Local Branch Exists | Remote Branch Exists | Branches on same commit?      | Continue? |
+| --- | ------------------- | -------------------- | ----------------------------- | --------- |
+|   1 | Yes                 | Yes                  | Yes                           | Yes       |
+|   2 | Yes                 | Yes                  | No                            | No        |
+|   3 | Yes                 | No                   | Same as the default branch    | Yes       |
+|   4 | Yes                 | No                   | Different from default branch | No        |
+|   5 | No                  | Yes                  | N/A                           | Yes       |
+|   6 | No                  | No                   | N/A                           | Yes       |
 
 **Every "yes" needs no ref moved; every "no" would.** That is the whole rule, and
 it is *mkprs never moves a branch to a commit it did not create* in
