@@ -53,12 +53,34 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 func (a *app) run() int {
+	if err := a.prepare(); err != nil {
+		fmt.Fprintf(a.errw, "Error: %v\n", err)
+		return exitUsage
+	}
+
+	repos, err := a.collectRepos()
+	if err != nil {
+		fmt.Fprintf(a.errw, "Error: %v\n", err)
+		return exitUsage
+	}
+
+	if len(repos) == 0 {
+		fmt.Fprintln(a.errw, "No target repositories found.")
+		return exitOK
+	}
+
+	a.processAll(repos)
+	return exitOK
+}
+
+// prepare checks what can be checked without touching a repo and fills in the
+// values the rest of the run assumes are set.
+func (a *app) prepare() error {
 	// Nothing about this varies per repo, so nothing is learned by asking each
 	// one: git would refuse the name in all of them, after each had been walked
 	// and fetched.
 	if err := validateBranchName(a.cfg.branch); err != nil {
-		fmt.Fprintf(a.errw, "Error: %v\n", err)
-		return exitUsage
+		return err
 	}
 
 	if a.cfg.message == "" {
@@ -67,10 +89,16 @@ func (a *app) run() int {
 	if a.cfg.title == "" {
 		a.cfg.title = firstLine(a.cfg.message)
 	}
+	return nil
+}
 
-	// A target that cannot be interpreted stops the run here, before the first
-	// repo is touched -- once pull requests exist, Ctrl-C does not take them
-	// back, so everything checkable is checked up front.
+// collectRepos expands every target into the deduplicated list of repos to
+// process, accounting for whatever it discards along the way.
+//
+// A target that cannot be interpreted stops the run here, before the first repo
+// is touched -- once pull requests exist, Ctrl-C does not take them back, so
+// everything checkable is checked up front.
+func (a *app) collectRepos() ([]string, error) {
 	var repos []string
 	var barren []string
 	for _, dir := range a.cfg.targetDirs {
@@ -78,8 +106,7 @@ func (a *app) run() int {
 
 		var err error
 		if repos, err = discoverRepos(dir, repos); err != nil {
-			fmt.Fprintf(a.errw, "Error: %v\n", err)
-			return exitUsage
+			return nil, err
 		}
 
 		// A target that holds no repos is ordinary -- `~/repos/*` sweeps up a
@@ -98,11 +125,11 @@ func (a *app) run() int {
 	repos, dropped := dedupeRepos(repos)
 	a.reportIgnored(dropped, "duplicate repository", "duplicate repositories")
 
-	if len(repos) == 0 {
-		fmt.Fprintln(a.errw, "No target repositories found.")
-		return exitOK
-	}
+	return repos, nil
+}
 
+// processAll runs every repo in turn and prints the closing summary.
+func (a *app) processAll(repos []string) {
 	rep := newReporter(a.out, repos)
 
 	for i, repoPath := range repos {
@@ -137,7 +164,6 @@ func (a *app) run() int {
 	}
 
 	rep.summary()
-	return exitOK
 }
 
 // reportIgnored accounts for arguments the run discarded. Discarding one
