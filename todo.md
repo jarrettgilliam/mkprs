@@ -326,7 +326,9 @@ before it asks.
 
 ### Make `--verbose` actually verbose
 
-**High** — wide, shallow work at every git call site.
+**High, after *a failed fetch carries on against stale refs*** — wide, shallow
+work at every git call site, and it touches `fetchOrigin` that item is about to
+rewrite.
 
 Today it streams one thing — the user's command's two streams, prefixed
 `[repo]` — and nothing else. Everything mkprs itself does is either suppressed or
@@ -503,8 +505,10 @@ files), but a command that drops build artifacts in a repo with a thin
 
 ### Bug: a failed fetch carries on against stale refs
 
-**High** — a wrong skip made on stale data, plus repos left dirty by a push that
-was never going to work.
+**High, first of the band and next up** — a wrong skip made on stale data, plus
+repos left dirty by a push that was never going to work. It goes ahead of *Make
+`--verbose` actually verbose* because both rewrite `fetchOrigin`, and this one
+deletes the warning that item would otherwise convert into a trace line.
 
 `fetchOrigin` (`git.go`) discards the error, writes `Could not fetch origin for
 <repo>; using local refs.` into the capture, and continues. Its comment argues
@@ -538,9 +542,9 @@ is the silent batch failure that item exists to remove.
 
 `fetchOrigin` then loses its `repoName` parameter, since the reason line already
 carries the name through the reporter, and returns an error for `preflight` to
-turn into the failure. It also stops writing prose into the capture, which is the
-whole of the `fetchOrigin` bullet under *Make `--verbose` actually verbose* — that
-bullet goes with this.
+turn into the failure. The warning text goes with it, which removes the one place
+mkprs writes its own prose into the capture — so there is nothing left there for
+*Make `--verbose` actually verbose* to reroute.
 
 **No `--no-fetch` escape hatch.** It would reintroduce every hazard above on
 purpose, and the offline run it implies cannot open a pull request anyway.
