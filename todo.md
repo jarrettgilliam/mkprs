@@ -41,16 +41,17 @@ when they are added; an item with no band is one nobody has decided about yet.
 
 - Instead of picking the first item, pick an item from the list using the
   rules from the priorities section above.
-- Use red/green test driven development (TDD).test Write failing tests first,
-  then make them pass. This validates the test works as it should, while also
-  clearly defining behavior before writing the implementation.
+- Use red/green test driven development (TDD). Write failing tests first, then
+  make them pass. This validates the test works as it should, while also clearly
+  defining behavior before writing the implementation.
 - Work on a single item at a time.
 - If you have any questions that this file or source code doesn't clarify, ask.
   Don't make assumptions.
-- When finished, update this file. Completed items are deleted rather than marked
-  done then stop. I'll review, commit, and push before work starts on the next feature.
+- When finished, update this file — completed items are deleted rather than
+  marked done — then stop. I'll review, commit, and push before work starts on
+  the next feature.
 - Do not add to [`design-notes.md`](design-notes.md). These notes are
- architectural decisions that drive this TODO list. It's not a changelog.
+  architectural decisions that drive this TODO list. It's not a changelog.
 
 ## Flags & UX
 
@@ -355,7 +356,7 @@ The gaps, in the order they bite:
   `status --porcelain` is precisely the list of files that made a repo skip as
   "working tree not clean", and today that list is unobtainable without
   re-running git by hand.
-- **git's stderr goes to the `-v` console and nowhere else.** It must never be
+- **git's stderr belongs on the `-v` stream and nowhere else.** It must never be
   appended to a skip or fail reason. Those lines are read by people who did not
   ask how mkprs works and should not have to know: `could not compare 'b' to
   origin/main` is the message, and `fatal: ambiguous argument 'origin/main..b'`
@@ -366,31 +367,66 @@ The gaps, in the order they bite:
 
   Consequence: **delete `gitError`** as part of this item. Its only purpose is to
   fold git's first stderr line into an error so a reason line can carry it, which
-  is the thing being ruled out. Nothing consumes it today either — `getDefaultBranch`
-  and `branchAhead` return a `bool`, so the error dies inside the helper — and
-  once `git` buffers stderr to echo it under `-v`, the console has the full text
-  anyway. Keeping it would leave a helper whose only reader is a rule against
-  reading it.
+  is the thing being ruled out. No production code consumes it either —
+  `getDefaultBranch` and `branchAhead` return a `bool`, so the error dies inside
+  the helper — and once `git` buffers stderr to echo it under `-v`, stderr has
+  the full text anyway. Keeping it would leave a helper whose only reader is a
+  rule against reading it.
+
+  **`TestGitErrorCarriesStderr` goes with it.** It is the one thing that reads
+  the enriched text: stubbing `gitError` to return `err` unchanged fails that
+  test and no other, which is what "nothing consumes it" was measured by. Replace
+  it with a test that git's stderr reaches stderr under `-v` — the mechanism is
+  being swapped for a route, so the test should follow the route.
 - **`--quiet`/`-q` on the mutating commands.** `checkout -b … --quiet`,
   `commit -q`, `push … --quiet` and `fetch … --quiet` all route through `gitTo`,
   so they would stream — the flag is what silences them. Under `-v` that costs
   commit's "3 files changed, 40 insertions", checkout's "Switched to a new
-  branch", and push's `remote:` lines. Pass the quiet flags only when not
-  verbose. If that becomes too cumbersome, stop passing `--quiet` altogether
-  and only stream the output in --verbose mode. Otherwise ignore stdout and stderr.
-  Do not reach for `--progress` on fetch/push to force the transfer
-  meter back: git suppresses it off a tty for good reason, and it is noise
-  rather than information.
+  branch", and push's `remote:` lines.
+
+  **Stop passing the quiet flags altogether**, and decide the destination in one
+  place instead: under `-v` both streams go to stderr, and otherwise both are
+  discarded. That is simpler than making four call sites conditional, and it puts
+  every internal git command on the same rule as the interrogating helpers above
+  — mkprs's own output is either on screen under `-v` or nowhere.
+
+  **Internal git output never enters `c.buf`**, in either mode. The buffer holds
+  the user's command's output and that alone, so a quiet failure still replays
+  everything the command said under its `❌`, exactly as today. What changes is
+  that a failing internal command — `could not commit`, `unable to push` — no
+  longer contributes git's complaint to that replay, since today `--quiet`
+  suppresses its chatter but not its errors. That is the intended trade: the
+  reason line says what mkprs concluded, and `-v` is where the evidence lives.
+
+  Do not reach for `--progress` on fetch/push to force the transfer meter back:
+  git suppresses it off a tty for good reason, and it is noise rather than
+  information.
 - **`git branch -D`'s stdout is discarded** by `gitErrTo` as noise, but
   "Deleted branch bump-deps (was abc1234)" carries the only record of what was
   just thrown away. Under `-v` it should print.
-- **Echo the user's command.** in the same way that `git` commands are, preceded by a `$`
-  This makes the output consistent for commands in verbose mode.
-- All `--verbose` output should go to stderr. That way debug logs can be redirected
-  to a file for researching later if a run failed, while Keeping the console output terse.
-  The redirected is optional of course, but a nice feature.
+- **The user's command goes to stderr** in --verbose mode only,
+  on its own line, prefixed with `$`, immediately before it runs, so the
+  output that follows has something naming what produced it. It should be
+  indistinguishable from other commands in --verbose mode.
+
+  **`{}` is expanded in what is printed**, so this is the only place the argv
+  that actually ran appears. The command as typed is not the command as run, and
+  it differs from repo to repo.
+- **All `--verbose` output goes to stderr** — the trace lines, the internal git
+  streams, and the user's command as it is streamed live. Results keep stdout to
+  themselves: the `✅`/`⏭️`/`❌` lines, the failure replay under them, and the
+  summary. That makes `2>run.log` a complete diagnostic record to read after a
+  failed run, while the console keeps only the terse half, and it costs one
+  argument at the `newCapture` call site.
 
 #### Mark the lines that only exist because of `-v`
+
+**Every command mkprs runs is printed to stderr, prefixed with `$`, before it
+runs** — the internal git invocations, `gh`, and the user's command alike. There
+is no category that runs silently under `-v`: if a process is started, the line
+that started it is on screen above its output. `gitCommand` is the one place
+every git invocation is built, so that is where the printing belongs rather than
+at each call site.
 
 Two kinds of line, kept visually distinct, so a reader can tell mkprs's narration
 from the output it is narrating:
@@ -403,7 +439,8 @@ from the output it is narrating:
 ```
 
 The `$` marker is the shell-prompt convention for "this is the command, not its
-output". Echo before running, not after, so a hang is attributable to the line above it.
+output". Echo before running, not after, so a hang is attributable to the line
+above it.
 
 **Quote the arguments that would otherwise read as several.** Joining argv on
 spaces turns `-m` `Fix typo in README` into four arguments on screen, and the
@@ -413,20 +450,25 @@ line, so the only requirement is that a reader can see where each argument ends.
 `{}` expansion happens first — it is the whole reason two repos run different
 argv, so tracing the unexpanded form would hide the only part that varies.
 
-**Trace lines go straight to `c.out`, never into `c.buf`.** The buffer is what a
-failure replays under `❌` in quiet mode, and it must keep holding exactly what
-the repo emitted — otherwise the two modes disagree about what happened. That
-also answers "which lines exist only because of verbosity" precisely: the
-`$` ones, and they never appear in a replay. A `func (c *capture) trace(format
-string, args ...any)` that no-ops unless `c.verbose` puts the condition in one
-place instead of at every call site.
+**Trace lines go straight to stderr, never into `c.buf`.** The buffer is what a
+failure replays under `❌`, and it must keep holding exactly what the user's
+command emitted — otherwise the two verbosities disagree about what the command
+did. That also answers "which lines exist only because of verbosity" precisely:
+the `$` ones, and they never appear in a replay. A `func (c *capture)
+trace(format string, args ...any)` that no-ops unless `c.verbose` puts the
+condition in one place instead of at every call site.
+
+`capture` currently streams to `a.out`; it takes the writer as a constructor
+argument, so this is `newCapture(name, a.cfg.verbose, a.errw)` and nothing
+further. Worth renaming the field off `out` at the same time, since it stops
+being the same stream the reporter writes to.
 
 **Do not add a replay for verbose.** A failure under `-v` already streamed
 everything live; reprinting it under the `❌` would double it. `--fail-fast` is
 the answer to "the failing repo's output is scattered among the others", and it
 is a better one than a replay.
 
-**Echo `gh` too**, with its full argv — and when the REST `prOpener` lands, the
+**`gh` goes to sdterr with its full argv** — and when the REST `prOpener` lands, the
 method and URL in its place. That inherits the redaction constraint from
 *Replace `gh`*: the trace is printed verbatim, so an `Authorization` header must
 never be built into anything traceable. Worth a test that fixes this at the seam
