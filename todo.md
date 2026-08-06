@@ -14,8 +14,9 @@ the second axis.
 
 **The rules, in the order they are applied.**
 
-1. **Bugs before features**, regardless of size. A bug written inside a feature
-   item is still a bug: its own band, its own line, done first.
+1. **Security issues and bugs before features**, regardless of size. One written
+   inside a feature item still counts: its own band, its own line, done first.
+   Security issues go first among those.
 2. **Prerequisites above what they unblock.**
 3. **Value against effort, for everything left.** The middle is judgement, and
    the line under each heading records it so it can be disagreed with.
@@ -24,17 +25,17 @@ the second axis.
 
 **The bands.**
 
-- **P1** — bugs, safety nets, and cheap work another item is waiting on. Short,
-  meant to be emptied, and never behind a feature. Usually small, but size does
-  not buy a bug its way out.
-- **P2** — the features. Most of the remaining worth and most of the work.
-- **P3** — high cost against low reward, plus work deliberately parked. Not
-  "never", but ahead of P2 it would be a mistake rather than merely early.
+- **High** — security issues, bugs, safety nets, and cheap work another item is
+  waiting on. Short, meant to be emptied, and never behind a feature. Usually
+  small, but size does not buy a bug or a vulnerability its way out.
+- **Medium** — the features. Most of the remaining worth and most of the work.
+- **Low** — a lot of work for little return, plus work deliberately parked. Not
+  "never", but ahead of Medium it would be a mistake rather than merely early.
 
 **Maintaining the bands.** Order within a band is loose; the band is the
 commitment. A fixed position is stated on the item's own band line and nowhere
 else. Rebanding is a normal edit — finishing an item can promote another by
-clearing its prerequisite, and a P3 moves up on evidence. New items get a band
+clearing its prerequisite, and a Low moves up on evidence. New items get a band
 when they are added; an item with no band is one nobody has decided about yet.
 
 ## Working agreement
@@ -57,7 +58,7 @@ when they are added; an item with no band is one nobody has decided about yet.
 
 ### `-i, --interactive` review gate
 
-**P3** — the largest item here, and `--list`, `--fail-fast` and `--update` each
+**Low** — the largest item here, and `--list`, `--fail-fast` and `--update` each
 deliver a piece of its value far more cheaply.
 
 Pause in each repo after the command has run but before anything is staged,
@@ -127,8 +128,8 @@ exists to prevent.
 
 ### `--update` to add to an existing branch and PR
 
-**P2** — the band's highest value and its largest change; nothing is waiting on
-it, so it follows the P1 items rather than leading them.
+**Medium** — the band's highest value and its largest change; nothing is waiting on
+it, so it follows the High items rather than leading them.
 
 Today, once a run has opened its pull requests, mkprs cannot touch them again: the
 branch now exists, so `preflight` skips every repo with `branch '<b>' already
@@ -308,7 +309,7 @@ count.
 
 ### `--list` to preview the repo set
 
-**P2, first of the band** — best value per line left: a flag, an early return and
+**Medium, first of the band** — best value per line left: a flag, an early return and
 a loop over facts `preflight` already computes.
 
 Print which repos pass the filters (GitHub remote, clean tree, branch free) and
@@ -318,7 +319,7 @@ before it asks.
 
 ### `--fail-fast` to stop at the first failure
 
-**P1** — a flag and a `break`, and *Make `--verbose` actually verbose* depends on
+**High** — a flag and a `break`, and *Make `--verbose` actually verbose* depends on
 it landing first.
 
 The main loop always continues after a failure. When the first repo fails because
@@ -335,7 +336,7 @@ actually verbose*.
 
 ### Make `--verbose` actually verbose
 
-**P1, after `--fail-fast`** — wide, shallow work at every git call site.
+**High, after `--fail-fast`** — wide, shallow work at every git call site.
 
 Today it streams one thing — the user's command's two streams, prefixed
 `[repo]` — and nothing else. Everything mkprs itself does is either suppressed or
@@ -488,7 +489,7 @@ lines land in one place.
 
 ### `--tracked-only` staging
 
-**P2, last of the band** — smallest feature left, `-A` against `-u`
+**Medium, last of the band** — smallest feature left, `-A` against `-u`
 
 `git add -A` stages everything the command left behind, including new files. That
 is the right default (tools like `dotnet outdated -u` and scaffolders create
@@ -504,7 +505,7 @@ they did not know it would. Opt-out, not opt-in.
 
 ### Per-repo command timeout, defaulting to 10 minutes
 
-**P1** — one `exec.CommandContext` in `runCommand`, against a run that otherwise
+**High** — one `exec.CommandContext` in `runCommand`, against a run that otherwise
 stalls forever with no output.
 
 One hung command stalls the whole run with no feedback, and serial execution
@@ -519,7 +520,7 @@ the same afternoon; tune it once there is evidence, but do not ship it unset.
 
 ### `--max-repos` safety limit, defaulting to 50
 
-**P1** — one comparison plus a message, and the only thing between a mistyped
+**High** — one comparison plus a message, and the only thing between a mistyped
 target and 200 pull requests in other people's repos.
 
 Easy to point this at `~/repos` and accidentally open 200 PRs. Hard-fail before
@@ -534,7 +535,7 @@ does not spend two of the budget.
 
 ## Replace `gh` with direct GitHub API calls
 
-**P2** — high work and high reward: it drops the last external binary
+**Medium** — high work and high reward: it drops the last external binary
 
 `gh` is the last external binary mkprs needs, which undercuts the reason it was
 written in Go: download one file and run it, on any platform. A user without the
@@ -656,7 +657,7 @@ tests, not from having two production implementations.
 
 ### Spell out names that outlive their line
 
-**P3** — readability only, and cheapest done after the items that are about to
+**Low** — readability only, and cheapest done after the items that are about to
 rewrite these same signatures.
 
 Single letters are fine for a local whose declaration is visible from its use.
@@ -690,7 +691,7 @@ fine; this is not a sweep of everything short.
 
 ### A `repo` type for the git helpers
 
-**P3** — parked by its own last sentence: high work, and only worth it if
+**Low** — parked by its own last sentence: high work, and only worth it if
 `git.go` grows again.
 
 Every git helper takes `repoPath` first, which is a method receiver wearing a
