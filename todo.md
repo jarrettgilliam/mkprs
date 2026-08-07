@@ -559,55 +559,6 @@ files), but a command that drops build artifacts in a repo with a thin
 
 ## Repository processing
 
-### Reclassify the pre-flight outcomes as failures
-
-**High, before *a run with failed repos still exits 0*** — that item maps
-`outcomeFailed` to exit 2, so landing it first would ship the codes computed from
-the wrong classification.
-
-*A failure is a repo you will have to run again for* in
-[`design-notes.md`](design-notes.md) is new, and `preflight` predates it: every
-condition that ends a repo there is an `outcomeSkipped` today. Under the rule
-only one of them still is.
-
-| condition | now | wanted |
-| --- | --- | --- |
-| non-GitHub remote / no `origin` | skip | skip |
-| working tree not clean | skip | **fail** |
-| could not determine default branch | skip | **fail** |
-| not on a branch (detached HEAD) | skip | **fail** |
-| branch already exists locally / on origin | skip | **fail** |
-| could not fetch origin | fail | fail |
-
-Only the first is a determination that nothing is wanted here: the target is not
-something mkprs can ever act on, and re-running changes nothing. The other four
-are all "the work is still wanted and mkprs could not get to it" — clean the
-tree, set `origin/HEAD`, check out a branch, deal with the existing branch, then
-run again. `command made no changes` in `commitAndPush` is the only other skip
-left, and it is the earned one: the command ran and produced nothing.
-
-**"Branch already exists" is the one worth arguing about**, because on origin it
-usually *is* a previous run's PR and so genuinely nothing to do. But mkprs is
-inferring that from a name. It could equally be a different command's branch, or
-one a colleague pushed, and nothing local distinguishes them — so it cannot be a
-determination, only a guess. `--update` is where this gets a real answer; see *On
-`branchAhead` functionality*.
-
-The reason lines get re-read as part of this, since a `❌` promises to say what
-would unblock it. `could not determine default branch` is the weakest: after a
-successful fetch it is a fact about the remote, so `no default branch on origin`
-names the fact, and `git remote set-head origin -a` is the fix worth naming.
-
-**`--stop-on-failure` widens with it**, deliberately. It stops for a wrong
-command and a wrong starting state alike, which is the same question — will this
-run have to happen again? A dirty repo aborting the run is the flag working, not
-a false positive.
-
-`isCleanTree` (`git.go`) folds a git error into "not clean" — `err == nil && out
-== ""` — so a broken `status` reports as a dirty tree. Both are failures now, so
-nothing is misreported to the user, but the reason line names the wrong cause.
-Worth splitting while the call site is open.
-
 ### Bug: cleanup can fail silently after a successful run
 
 **High** — a repo left somewhere the user did not put it, under a `✅` that says

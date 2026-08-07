@@ -43,8 +43,12 @@ func preflight(repoPath, branch string, c *capture) (prep, outcome) {
 		return prep{}, skip(note)
 	}
 
-	if !isCleanTree(repoPath) {
-		return prep{}, skip("working tree not clean")
+	clean, ok := isCleanTree(repoPath)
+	if !ok {
+		return prep{}, fail("could not read the working tree status", c)
+	}
+	if !clean {
+		return prep{}, fail("working tree not clean", c)
 	}
 
 	// Fetch before any decision that reads a ref. --prune clears
@@ -56,18 +60,20 @@ func preflight(repoPath, branch string, c *capture) (prep, outcome) {
 
 	defaultBranch, ok := getDefaultBranch(repoPath)
 	if !ok {
-		return prep{}, skip("could not determine default branch")
+		return prep{}, fail("no default branch on origin; set it with 'git remote set-head origin -a'", c)
 	}
 
-	// Recorded before the branch is cut, since this is where the repo is put
-	// back. A detached HEAD has no name to record.
 	startBranch, ok := headBranch(repoPath)
 	if !ok {
-		return prep{}, skip("not on a branch (detached HEAD)")
+		return prep{}, fail("not on a branch (detached HEAD)", c)
 	}
 
+	// A name is all mkprs has here: the branch may be a previous run's PR, a
+	// colleague's, or a different command's, and nothing local tells them
+	// apart. So this is a guess that the work is still wanted, not a
+	// determination that it is not -- which is what --update is meant to settle.
 	if where := branchLocation(repoPath, branch); where != "" {
-		return prep{}, skip(fmt.Sprintf("branch '%s' already exists %s", branch, where))
+		return prep{}, fail(fmt.Sprintf("branch '%s' already exists %s", branch, where), c)
 	}
 
 	return prep{

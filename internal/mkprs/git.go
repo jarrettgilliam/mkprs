@@ -94,10 +94,14 @@ func isGitHubRepo(repoPath string) (bool, string) {
 	return true, ""
 }
 
-// isCleanTree reports whether the working tree has no changes.
-func isCleanTree(repoPath string) bool {
+// isCleanTree reports whether the working tree has no changes, and whether the
+// question could be answered at all.
+func isCleanTree(repoPath string) (clean, ok bool) {
 	out, err := git(repoPath, "status", "--porcelain")
-	return err == nil && out == ""
+	if err != nil {
+		return false, false
+	}
+	return out == "", true
 }
 
 // getDefaultBranch resolves the repo's default branch, preferring origin/HEAD and

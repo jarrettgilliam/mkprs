@@ -3,9 +3,9 @@ package mkprs
 import "fmt"
 
 // outcome is the closed set of ways a repo can end up. A skip is a normal
-// result (dirty tree, nothing to do), not an error, hence three states rather
-// than an error and its absence. Each variant renders and counts itself, so
-// nothing outside has to know which one it is holding.
+// result (nothing to do here), not an error, hence three states rather than an
+// error and its absence. Each variant renders and counts itself, so nothing
+// outside has to know which one it is holding.
 type outcome interface {
 	// report renders this result and counts it. Unexported, so no type outside
 	// this package can implement outcome.

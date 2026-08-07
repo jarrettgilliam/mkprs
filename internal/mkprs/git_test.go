@@ -119,13 +119,28 @@ func TestIsCleanTree(t *testing.T) {
 	f := newFixture(t)
 	repo := f.repo("x")
 
-	if !isCleanTree(repo) {
-		t.Fatal("a freshly committed repo should be clean")
+	if clean, ok := isCleanTree(repo); !ok || !clean {
+		t.Fatalf("isCleanTree = %v, %v; want a freshly committed repo to be clean", clean, ok)
 	}
 
 	writeFile(t, filepath.Join(repo, "file.txt"), "changed\n")
-	if isCleanTree(repo) {
-		t.Error("a modified repo should not be clean")
+	if clean, ok := isCleanTree(repo); !ok || clean {
+		t.Errorf("isCleanTree = %v, %v; want a modified repo to be dirty", clean, ok)
+	}
+}
+
+// A status that could not run at all is a different answer from a dirty tree.
+// Both fail the repo, but only one of them is about the working tree, and the
+// reason line has to name the right cause.
+func TestIsCleanTreeUnreadable(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	notARepo := filepath.Join(f.root, "notes")
+	mkdir(t, notARepo)
+
+	if clean, ok := isCleanTree(notARepo); ok {
+		t.Errorf("isCleanTree = %v, %v; want the status to be unanswerable", clean, ok)
 	}
 }
 
@@ -138,8 +153,8 @@ func TestIsCleanTreeUntracked(t *testing.T) {
 	repo := f.repo("x")
 	writeFile(t, filepath.Join(repo, "stray.txt"), "x\n")
 
-	if isCleanTree(repo) {
-		t.Error("an untracked file should make the tree dirty")
+	if clean, ok := isCleanTree(repo); !ok || clean {
+		t.Errorf("isCleanTree = %v, %v; want an untracked file to make the tree dirty", clean, ok)
 	}
 }
 

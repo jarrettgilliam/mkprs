@@ -32,8 +32,8 @@ func TestResultLines(t *testing.T) {
 		},
 		{
 			name:   "skip states the reason",
-			report: func(w *bytes.Buffer) { skip("working tree not clean").report(testReporter(w), "acme-web") },
-			want:   "⏭️  acme-web skipped: working tree not clean\n",
+			report: func(w *bytes.Buffer) { skip("command made no changes").report(testReporter(w), "acme-web") },
+			want:   "⏭️  acme-web skipped: command made no changes\n",
 		},
 		{
 			name: "failure states the reason",
@@ -111,7 +111,7 @@ func TestReporterTally(t *testing.T) {
 	r := testReporter(&buf)
 
 	success("https://x/1").report(r, "a")
-	skip("working tree not clean").report(r, "b")
+	skip("command made no changes").report(r, "b")
 	fail("boom", newCapture("c", false, &buf)).report(r, "c")
 	fail("boom", newCapture("d", false, &buf)).report(r, "d")
 

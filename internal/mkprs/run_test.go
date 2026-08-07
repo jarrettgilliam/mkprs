@@ -449,11 +449,9 @@ func TestRunSkips(t *testing.T) {
 		{
 			name: "before the command runs",
 			setup: func(t *testing.T, f *fixture) string {
-				repo := f.repo("x")
-				writeFile(t, filepath.Join(repo, "file.txt"), "uncommitted\n")
-				return repo
+				return f.repoWithRemote("x", "git@gitlab.com:fake/x.git")
 			},
-			want: "skipped: working tree not clean",
+			want: "skipped: non-GitHub remote",
 		},
 		{
 			// The other source, and the one that reaches cleanup with a branch
@@ -742,8 +740,7 @@ func TestRunStopOnFailure(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		dirty := f.repo("a")
-		writeFile(t, filepath.Join(dirty, "file.txt"), "uncommitted\n")
+		f.repoWithRemote("a", "git@gitlab.com:fake/a.git")
 		f.repo("b")
 		prs := &fakePR{}
 
@@ -756,6 +753,30 @@ func TestRunStopOnFailure(t *testing.T) {
 		}
 		if strings.Contains(got.stdout, "Stopped") {
 			t.Errorf("stdout = %q, want the run to carry on past a skip", got.stdout)
+		}
+	})
+
+	// The flag asks "will this run have to happen again?", which a starting
+	// state answers as readily as a command does -- so a dirty repo stops it.
+	t.Run("a wrong starting state stops the run", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		dirty := f.repo("a")
+		writeFile(t, filepath.Join(dirty, "file.txt"), "uncommitted\n")
+		f.repo("b")
+		prs := &fakePR{}
+
+		got := run(t, prs, []string{f.targets, "-b", "wip", "--stop-on-failure"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if !strings.Contains(got.stdout, "❌ a working tree not clean") {
+			t.Errorf("stdout missing the failure:\n%s", got.stdout)
+		}
+		if !strings.Contains(got.stdout, "Not processed: 1") {
+			t.Errorf("stdout = %q, want the second repo left untouched", got.stdout)
+		}
+		if len(prs.calls) != 0 {
+			t.Errorf("opened %d PRs, want none", len(prs.calls))
 		}
 	})
 
@@ -953,7 +974,7 @@ func TestRunVerboseListsIgnoredTargets(t *testing.T) {
 }
 
 // Overlapping targets name the same repo once. Processing it twice would open
-// the PR on the first pass, skip on the second with `branch 'b' already exists
+// the PR on the first pass, fail on the second with `branch 'b' already exists
 // on origin`, and report two outcomes for one repo.
 func TestRunDeduplicatesRepos(t *testing.T) {
 	t.Parallel()
@@ -1239,15 +1260,13 @@ func TestRunSummaryCountsEveryState(t *testing.T) {
 
 	f := newFixture(t)
 	f.repo("succeeds")
-	dirty := f.repo("skips")
+	dirty := f.repo("fails")
 	writeFile(t, filepath.Join(dirty, "file.txt"), "uncommitted\n")
-	f.repoWithRemote("alsoskips", "git@gitlab.com:fake/alsoskips.git")
+	f.repoWithRemote("skips", "git@gitlab.com:fake/skips.git")
 
-	// Fails only in the repo where the command can run: it writes to a path
-	// that does not exist.
 	got := run(t, &fakePR{}, []string{f.targets, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
 
-	for _, want := range []string{"Succeeded: 1", "Failed:    0", "Skipped:   2"} {
+	for _, want := range []string{"Succeeded: 1", "Failed:    1", "Skipped:   1"} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("summary missing %q:\n%s", want, got.stdout)
 		}
@@ -1346,8 +1365,10 @@ func TestPreflight(t *testing.T) {
 	})
 
 	// Every way a repo can stop here, in one table so the set stays legible.
-	// How a skip is then reported does not vary by reason, which is what
-	// TestRunSkips covers with a single row.
+	// Only the two determinations that nothing is wanted here are skips; every
+	// other row is a repo the run has to happen again for. How an outcome is
+	// then reported does not vary by reason, which is what TestRunSkips covers
+	// with a single row.
 	stops := []struct {
 		name  string
 		setup func(t *testing.T, f *fixture) string // returns the repo path
@@ -1375,7 +1396,20 @@ func TestPreflight(t *testing.T) {
 				writeFile(t, filepath.Join(repo, "file.txt"), "uncommitted\n")
 				return repo
 			},
-			want: "working tree not clean",
+			want:  "working tree not clean",
+			fails: true,
+		},
+		{
+			// The other half of the split: git could not answer the question at
+			// all, which is not the same fact about the repo.
+			name: "unreadable working tree status",
+			setup: func(t *testing.T, f *fixture) string {
+				repo := f.repo("x")
+				writeFile(t, filepath.Join(repo, ".git", "index"), "not an index\n")
+				return repo
+			},
+			want:  "could not read the working tree status",
+			fails: true,
 		},
 		{
 			name: "could not fetch origin",
@@ -1401,7 +1435,8 @@ func TestPreflight(t *testing.T) {
 				gitCmd(t, repo, "update-ref", "--no-deref", "-d", "refs/remotes/origin/HEAD")
 				return repo
 			},
-			want: "could not determine default branch",
+			want:  "no default branch on origin; set it with 'git remote set-head origin -a'",
+			fails: true,
 		},
 		{
 			name: "detached HEAD",
@@ -1410,7 +1445,8 @@ func TestPreflight(t *testing.T) {
 				gitCmd(t, repo, "checkout", "-q", "--detach")
 				return repo
 			},
-			want: "not on a branch (detached HEAD)",
+			want:  "not on a branch (detached HEAD)",
+			fails: true,
 		},
 		{
 			name: "branch already exists locally",
@@ -1419,7 +1455,8 @@ func TestPreflight(t *testing.T) {
 				gitCmd(t, repo, "branch", "b")
 				return repo
 			},
-			want: "branch 'b' already exists locally",
+			want:  "branch 'b' already exists locally",
+			fails: true,
 		},
 		{
 			name: "branch already exists on origin",
@@ -1429,7 +1466,8 @@ func TestPreflight(t *testing.T) {
 				gitCmd(t, repo, "fetch", "-q", "origin")
 				return repo
 			},
-			want: "branch 'b' already exists on origin",
+			want:  "branch 'b' already exists on origin",
+			fails: true,
 		},
 	}
 

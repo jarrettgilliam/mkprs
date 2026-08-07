@@ -51,11 +51,13 @@ The --max-repos limit is checked before any repo is touched, so a mistyped targe
 costs nothing; the message says which value proceeds.
 
 Branches are cut from, and PRs opened against, each repo's own default branch,
-regardless of which branch the repo happens to be on. A repo is skipped when
-its HEAD is detached, its working tree is dirty, the branch already exists, the
-command leaves no changes behind, or origin is not a GitHub remote. The command
-must leave the repo on the branch mkprs created -- one that switches branches
-fails that repo, leaving its work in place.
+regardless of which branch the repo happens to be on. A repo is skipped only
+when there is nothing to do: origin is not a GitHub remote, or the command
+leaves no changes behind. Anything else that stops a repo fails it, because the
+work is still wanted there -- a dirty working tree, a detached HEAD, a branch
+that already exists, an unreachable origin -- and the reason line says what to
+fix before running again. The command must leave the repo on the branch mkprs
+created -- one that switches branches fails that repo, leaving its work in place.
 
 A repo that succeeds or is skipped is returned to the branch it started on and
 mkprs's branch is deleted; -k opts out. A repo that fails is never cleaned up:
