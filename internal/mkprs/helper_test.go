@@ -214,6 +214,19 @@ func runHelper(args []string) int {
 		fmt.Fprintln(os.Stderr, strings.Join(rest[1:], " "))
 		return code
 
+	// kill stands in for an OOM kill: the process dies with no exit status at
+	// all. os.Process.Signal is used rather than syscall.Kill because the latter
+	// does not exist on Windows.
+	case "kill":
+		p, err := os.FindProcess(os.Getpid())
+		if err != nil {
+			return 2
+		}
+		if err := p.Signal(os.Kill); err != nil {
+			return 2
+		}
+		select {} // unreachable once the signal lands
+
 	// spew <lines> <exit-code> prints numbered lines before failing, so a test
 	// can check that a long failure is replayed in full rather than truncated.
 	case "spew":

@@ -126,7 +126,7 @@ func (a *app) runCommand(repoPath string, c *capture) error {
 	cmd.Stderr = c
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("command exited %d", exitCode(err))
+		return commandError(err)
 	}
 	return nil
 }
@@ -218,14 +218,21 @@ func resolvePath(path string) string {
 	return abs
 }
 
-// exitCommandNotFound is what a shell reports for a command it could not start.
-const exitCommandNotFound = 127
-
-// exitCode extracts a shell-style status from a failed exec.
-func exitCode(err error) int {
+// commandError turns a failed exec into the line that fails the repo. Only an
+// *exec.ExitError means the command ran: everything else -- a binary that is not
+// on PATH, a cmd.Dir that does not exist, a fork that failed -- happens before
+// there is a process, so there is no status to report and the error text is the
+// only account of it.
+func commandError(err error) error {
 	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		return ee.ExitCode()
+	if !errors.As(err, &ee) {
+		return fmt.Errorf("could not run command: %w", err)
 	}
-	return exitCommandNotFound
+	if code := ee.ExitCode(); code >= 0 {
+		return fmt.Errorf("command exited %d", code)
+	}
+	// ExitCode is -1 for a signalled process. ProcessState names the signal
+	// ("signal: killed") without a syscall import that will not build on
+	// Windows, where this branch is unreachable anyway.
+	return fmt.Errorf("command was killed (%s)", ee.ProcessState)
 }

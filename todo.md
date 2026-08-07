@@ -595,32 +595,6 @@ hand back an annotated outcome — `res` is already named for exactly this reaso
 Skips clean up too, so both `outcomeSuccess` and `outcomeSkipped` can carry the
 note.
 
-## Command execution
-
-### Bug: `runCommand` reports an exit code the command never had
-
-**High** — a failure line that names the wrong cause, fixed in one function.
-
-`exitCode` (`run.go`) falls back to 127 for any error that is not an
-`*exec.ExitError`. Nothing produces that number: 127 is a shell convention, and
-mkprs never goes through a shell — `exec.Command` does its own `LookPath` and
-`execve`, so a missing binary arrives as `*exec.Error` wrapping `fs.ErrNotExist`
-with no exit status at all. The fallback invents one.
-
-Two things go wrong from that. Every non-`ExitError` failure is reported as if
-the command were not found: `cmd.Dir` missing, the binary not executable, fork
-failing, or the `capture` returning a write error mid-stream all print
-`command exited 127`, and the underlying error text — the only thing that would
-explain any of them — is dropped. Separately, `ee.ExitCode()` is -1 for a process
-killed by a signal, so an OOM-killed command prints `command exited -1`, which is
-not a status any shell would report.
-
-Keep the real status when there is one, and report the real error when there is
-not: `command exited %d` for a non-negative code, the signal for a negative one,
-and `could not run command: %w` otherwise. `exitCode` and `exitCommandNotFound`
-both go. The "a command that cannot start" test (`run_test.go`) pins the invented
-127 and its comment argues for it, so both change with the code.
-
 ## Discovery & safety limits
 
 The timeout is a safety net, so it **ships with a default on**, as `--max-repos`

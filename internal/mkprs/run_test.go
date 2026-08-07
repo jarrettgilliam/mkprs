@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -1687,9 +1688,31 @@ func TestRunCommand(t *testing.T) {
 		if err == nil {
 			t.Fatal("runCommand succeeded, want an error")
 		}
-		// 127 is what a shell reports for "not found", and there is no exit
-		// status to read: the process never ran.
-		if got, want := err.Error(), "command exited 127"; got != want {
+		if got := err.Error(); !strings.HasPrefix(got, "could not run command: ") {
+			t.Errorf("error = %q, want it to report the exec failure", got)
+		}
+		if got := err.Error(); !strings.Contains(got, "mkprs-no-such-binary") {
+			t.Errorf("error = %q, want it to name the binary", got)
+		}
+	})
+
+	// ExitCode is -1 for a process a signal took down, and "command exited -1"
+	// is not a status any shell would report.
+	t.Run("a command killed by a signal", func(t *testing.T) {
+		t.Parallel()
+
+		if runtime.GOOS == "windows" {
+			t.Skip("windows has no signals; TerminateProcess yields a real exit status")
+		}
+
+		f := newFixture(t)
+		a := &app{cfg: &config{command: helperCmd(t, "kill")}}
+
+		err := a.runCommand(f.repo("x"), newCapture("x", false, io.Discard))
+		if err == nil {
+			t.Fatal("runCommand succeeded, want an error")
+		}
+		if got, want := err.Error(), "command was killed (signal: killed)"; got != want {
 			t.Errorf("error = %q, want %q", got, want)
 		}
 	})
