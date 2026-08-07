@@ -118,8 +118,8 @@ func getDefaultBranch(repoPath string) (string, bool) {
 // origin", or "" when it does not exist at all. Local wins when both match.
 //
 // The origin half reads a remote-tracking ref, which is only as fresh as the
-// last fetch: call this after fetchOrigin, or a branch deleted upstream still
-// looks like it exists.
+// last fetch: call this after a pruning fetch, or a branch deleted upstream
+// still looks like it exists.
 func branchLocation(repoPath, branch string) string {
 	if gitOK(repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch) {
 		return "locally"
@@ -128,14 +128,6 @@ func branchLocation(repoPath, branch string) string {
 		return "on origin"
 	}
 	return ""
-}
-
-// fetchOrigin refreshes origin, reporting into w but never failing the repo:
-// stale local refs are better than no run at all.
-func fetchOrigin(repoPath, repoName string, w io.Writer) {
-	if err := gitTo(repoPath, w, "fetch", "origin", "--quiet", "--prune"); err != nil {
-		fmt.Fprintf(w, "Could not fetch origin for %s; using local refs.\n", repoName)
-	}
 }
 
 // resolveBase prefers the remote-tracking ref so new branches start from what

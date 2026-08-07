@@ -46,10 +46,13 @@ func preflight(repoPath, branch string, c *capture) (prep, outcome) {
 	if !isCleanTree(repoPath) {
 		return prep{}, skip("working tree not clean")
 	}
+
 	// Fetch before any decision that reads a ref. --prune clears
 	// refs/remotes/origin/<branch> after a PR is merged and its branch deleted
 	// upstream; checking first would skip the repo on a ref that is only stale.
-	fetchOrigin(repoPath, filepath.Base(repoPath), c)
+	if err := gitTo(repoPath, c, "fetch", "origin", "--quiet", "--prune"); err != nil {
+		return prep{}, fail("could not fetch origin", c)
+	}
 
 	defaultBranch, ok := getDefaultBranch(repoPath)
 	if !ok {

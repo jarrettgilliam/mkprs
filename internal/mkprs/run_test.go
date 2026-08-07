@@ -603,6 +603,32 @@ func TestRunFailures(t *testing.T) {
 		}
 	})
 
+	// TestPreflight covers the outcome and its reason; what only a whole run can
+	// show is that failing there costs the repo nothing -- no branch, and the
+	// command never runs. That is the entire argument for failing on the fetch
+	// rather than at the push it was going to fail at anyway.
+	t.Run("a failed fetch touches nothing", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		if err := os.RemoveAll(f.bare("x")); err != nil {
+			t.Fatalf("remove the remote: %v", err)
+		}
+
+		got := run(t, &fakePR{}, []string{f.targets, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
+
+		if !strings.Contains(got.stdout, "❌ x could not fetch origin") {
+			t.Errorf("stdout = %q, want a fetch failure", got.stdout)
+		}
+		if localHasBranch(t, repo, "b") {
+			t.Error("the working branch should never have been created")
+		}
+		if got, want := readFile(t, filepath.Join(repo, "file.txt")), "hello\n"; got != want {
+			t.Errorf("file.txt = %q, want %q -- the command should not have run", got, want)
+		}
+	})
+
 	t.Run("a failing PR is reported and cleaned up", func(t *testing.T) {
 		t.Parallel()
 
@@ -1326,6 +1352,7 @@ func TestPreflight(t *testing.T) {
 		name  string
 		setup func(t *testing.T, f *fixture) string // returns the repo path
 		want  string
+		fails bool // a failure rather than a skip
 	}{
 		{
 			name: "non-GitHub remote",
@@ -1351,21 +1378,27 @@ func TestPreflight(t *testing.T) {
 			want: "working tree not clean",
 		},
 		{
-			// Only reachable when the fetch fails: git recreates origin/HEAD
-			// on a successful one, so preflight would otherwise heal this
-			// between deleting the ref and reading it. Origin still says
-			// github.com -- the repo gets this far -- but there is nothing
-			// behind it any more and no cached refs to fall back on.
-			name: "no discoverable default branch",
+			name: "could not fetch origin",
 			setup: func(t *testing.T, f *fixture) string {
 				repo := f.repo("x")
 				if err := os.RemoveAll(f.bare("x")); err != nil {
 					t.Fatalf("remove the remote: %v", err)
 				}
-				// --no-deref, or this deletes origin/main instead: origin/HEAD
-				// is a symref pointing at it.
+				return repo
+			},
+			want:  "could not fetch origin",
+			fails: true,
+		},
+		{
+			name: "no discoverable default branch",
+			setup: func(t *testing.T, f *fixture) string {
+				repo := f.repoOn("x", "trunk", "git@github.com:fake/x.git")
+				gitCmd(t, f.bare("x"), "update-ref", "-d", "refs/heads/trunk")
+				// Pruning refs/remotes/origin/trunk leaves origin/HEAD pointing
+				// at it, and symbolic-ref resolves a dangling symref happily --
+				// so without this the default branch is still "trunk".
+				// --no-deref, or this deletes origin/trunk instead.
 				gitCmd(t, repo, "update-ref", "--no-deref", "-d", "refs/remotes/origin/HEAD")
-				gitCmd(t, repo, "update-ref", "-d", "refs/remotes/origin/main")
 				return repo
 			},
 			want: "could not determine default branch",
@@ -1411,12 +1444,23 @@ func TestPreflight(t *testing.T) {
 			if res == nil {
 				t.Fatalf("preflight carried on, want %q", tt.want)
 			}
-			skipped, ok := res.(outcomeSkipped)
-			if !ok {
-				t.Fatalf("outcome = %T, want a skip -- none of these is a failure", res)
+
+			var reason string
+			var fails bool
+			switch o := res.(type) {
+			case outcomeSkipped:
+				reason = o.reason
+			case outcomeFailed:
+				reason, fails = o.reason, true
+			default:
+				t.Fatalf("outcome = %T, want a skip or a failure", res)
 			}
-			if got := skipped.reason; got != tt.want {
-				t.Errorf("reason = %q, want %q", got, tt.want)
+
+			if fails != tt.fails {
+				t.Errorf("failure = %v, want %v", fails, tt.fails)
+			}
+			if reason != tt.want {
+				t.Errorf("reason = %q, want %q", reason, tt.want)
 			}
 			// Nothing downstream may read the data return once the outcome is
 			// set, so it must not be half-filled.

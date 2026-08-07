@@ -340,45 +340,6 @@ func TestBranchAhead(t *testing.T) {
 	})
 }
 
-// fetchOrigin prunes, which is what clears a remote-tracking ref after the
-// branch is deleted upstream. See TestStaleRemoteBranchIsPruned for why.
-func TestFetchOriginPrunes(t *testing.T) {
-	t.Parallel()
-
-	f := newFixture(t)
-	repo := f.repo("x")
-	gitCmd(t, repo, "push", "-q", "origin", "HEAD:refs/heads/gone")
-	gitCmd(t, repo, "fetch", "-q", "origin")
-	gitCmd(t, f.bare("x"), "update-ref", "-d", "refs/heads/gone")
-
-	if got := branchLocation(repo, "gone"); got != "on origin" {
-		t.Fatalf("fixture: branchLocation = %q, want the stale ref to be present", got)
-	}
-
-	fetchOrigin(repo, "x", &bytes.Buffer{})
-
-	if got := branchLocation(repo, "gone"); got != "" {
-		t.Errorf("branchLocation = %q after fetch, want the ref pruned", got)
-	}
-}
-
-// A fetch failure is reported but never fails the repo: stale local refs beat
-// no run at all.
-func TestFetchOriginToleratesFailure(t *testing.T) {
-	t.Parallel()
-
-	f := newFixture(t)
-	repo := f.repo("x")
-	gitCmd(t, repo, "remote", "set-url", "origin", fileURL(filepath.Join(f.root, "nope.git")))
-
-	var out bytes.Buffer
-	fetchOrigin(repo, "x", &out)
-
-	if !strings.Contains(out.String(), "Could not fetch origin for x") {
-		t.Errorf("output = %q, want a fetch warning", out.String())
-	}
-}
-
 func TestRestoreRepo(t *testing.T) {
 	t.Parallel()
 

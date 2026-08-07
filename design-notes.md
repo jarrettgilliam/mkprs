@@ -31,12 +31,33 @@ is read around, never updated. Repositioning a ref destroys silently and
 unattended across forty repos, so it is off the table — which is why `--update`
 tests equality, not ancestry.
 
+## A failure is a repo you will have to run again for
+
+That is the whole distinction between the three outcomes. **Success** is a pull
+request. A repo is **skipped** only when mkprs determined there was nothing to
+do — the target is not a GitHub repo, or the command ran and changed nothing.
+Skip is earned by that determination; it is not the fallback for any condition
+mkprs can explain. Not being able to tell whether there was anything to do is
+itself a failure.
+
+So everything else that stops a repo is a **failure**, including the ones that
+touch nothing: an unreachable origin, a dirty tree, a detached HEAD, no
+discoverable default branch, a branch already present. None of those mean the
+work is not still wanted.
+
+`✅` and `⏭️` therefore both mean the repo needs nothing further, and `❌` means
+come back once something is fixed — so a failure's reason line says what would
+unblock it. The exit code restates this rather than deciding it, and
+`--stop-on-failure` stops for it: a wrong command and a wrong starting state
+both cost a second run, and neither is worth thirty more repos to discover.
+
 ## A failed repo is not cleaned up at all
 
 Cleanup is all or nothing: checking out the default branch drags the command's
 uncommitted edits along with it. So failures leave branch, commits and working
 tree as they are; skips still clean up. Same reason there is nothing between `-k`
-and full cleanup.
+and full cleanup. This is about failures after the branch is cut — the ones that
+stop a repo before it has anything to restore never reach cleanup at all.
 
 ## Targets name repos, not directories within them
 

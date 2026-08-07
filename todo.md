@@ -139,7 +139,7 @@ exists to prevent.
 it, so it follows the High items rather than leading them.
 
 Today, once a run has opened its pull requests, mkprs cannot touch them again: the
-branch now exists, so `preflight` skips every repo with `branch '<b>' already
+branch now exists, so `preflight` fails every repo with `branch '<b>' already
 exists on origin`. That reads like a guardrail but is the tool declining to help
 — the forgotten file, the second cleanup pass, the fix that occurs to you after
 review all have to be done by hand across thirty repos, which is the work mkprs
@@ -162,11 +162,12 @@ whatever branch happened to match the name is the trap that note warns about.
 
 mkprs currently only ever writes to branches it created, and that is doing more
 work than it looks: `mkprs ~/repos -b main -- <cmd>` is harmless today only
-because every repo skips on "branch already exists". Under `--update` the same
+because every repo fails on "branch already exists". Under `--update` the same
 typo would commit and push to `main` across the fleet.
 
 This is a startup error, the way an uninterpretable target is — not a per-repo
-skip, and not part of the table below, which would happily say "continue" for it.
+failure, and not part of the table below, which would happily say "continue" for
+it.
 
 #### When to continue
 
@@ -213,19 +214,22 @@ and don't pull work that could break the command you're about to run.
 squash-merged PR whose branch GitHub then deleted, or genuine local work that was
 never pushed — and git cannot tell the two apart, because squashing rewrites the
 SHAs. Only the PR's state distinguishes them, and asking for it would mean
-`prOpener` reporting state rather than a URL. It never has to: the repo is
-already skipped for needing a ref moved, so the harder question is one the table
+`prOpener` reporting state rather than a URL. It never has to: the repo has
+already failed for needing a ref moved, so the harder question is one the table
 never asks.
 
-Both skips name the branch and say what would unblock them — delete it, or push
-it — since the repo is otherwise silently absent from a run the user expected it
-in.
+**Every "no" row is a failure, not a skip**, by *a failure is a repo you will
+have to run again for* in [`design-notes.md`](design-notes.md). The work is still
+wanted in these repos; mkprs cannot reach it without moving a ref, and the user
+has to resolve that and re-run. So each names the branch and says what would
+unblock it — delete it, or push it — rather than leaving the repo quietly absent
+from a run it was expected in.
 
-Let's also talk about a PR that was squash-merged in a repo that does *not*
-auto-delete the branch. Local and remote still agree, but neither can be
-merged into the default branch, because they've diverged. `mkprs` should
-check for this scenario in the `preflight` function of run.go and "skip"
-if that's the case.
+A PR squash-merged in a repo that does *not* auto-delete the branch lands in row
+1: local and remote still agree, so the table says continue, but neither can be
+merged into the default branch any more because they have diverged. `preflight`
+should detect that and fail the repo — deleting the stale branch is the manual
+step that unblocks it, which is the same shape as rows 2 and 4.
 
 #### Where the branch starts from, by row
 
@@ -249,6 +253,12 @@ would push and report success on a no-op.
 Instead, we should only report success if `mkprs` pushes code or creates a PR.
 If all the code and PR already exist on the server, tell the user that and skip.
 If code is pushed or a PR is created, tell the user that and report success.
+
+That skip is an earned one — everything the run would have done is already on the
+server, so there is genuinely nothing to do and no reason to come back. It is the
+second of only two, beside "command made no changes"; see *a failure is a repo
+you will have to run again for* in [`design-notes.md`](design-notes.md).
+
 This fills in a functionality gaps. If the user command, stage, and commit all work,
 but push or PR creations fails (Due to poor network, auth failure, etc) the user
 has an automated path to push and create a PR for all repos after fixing network
@@ -276,8 +286,8 @@ repo standing *on* the branch, so a later run has `startBranch == branch`;
 `restoreRepo` would then no-op the checkout and try to `git branch -D` the branch
 it is standing on, which git refuses — and the refusal would go unseen, since
 `gitErrTo`'s error is discarded. That state is unreachable today only because
-`preflight` skips the repo before it gets there ("branch already exists
-locally"); `--update` is exactly the change that stops skipping it. Under this
+`preflight` fails the repo before it gets there ("branch already exists
+locally"); `--update` is exactly the change that lets it through. Under this
 rule the delete is never attempted.
 
 #### Opening versus updating the pull request
@@ -326,14 +336,12 @@ before it asks.
 
 ### Make `--verbose` actually verbose
 
-**High, after *a failed fetch carries on against stale refs*** — wide, shallow
-work at every git call site, and it touches `fetchOrigin` that item is about to
-rewrite.
+**High** — wide, shallow work at every git call site.
 
 Today it streams one thing — the user's command's two streams, prefixed
 `[repo]` — and nothing else. Everything mkprs itself does is either suppressed or
 routed somewhere the console never sees, so the flag shows the least interesting
-half of a run and hides the half that explains a skip. The rule to implement
+half of a run and hides the half that explains why a repo failed. The rule to implement
 against: under `-v`, anything that would help when something goes wrong is on
 screen, as it happens.
 
@@ -346,7 +354,7 @@ The gaps, in the order they bite:
   `diff --cached --quiet` check in `commitAndPush` — i.e. every filter that
   decides a repo's fate. Their stdout *is* the return value, which is the
   argument for swallowing it, but it is also the answer the user wants:
-  `status --porcelain` is precisely the list of files that made a repo skip as
+  `status --porcelain` is precisely the list of files that failed a repo as
   "working tree not clean", and today that list is unobtainable without
   re-running git by hand.
 - **git's stderr belongs on the `-v` stream and nowhere else.** It must never be
@@ -551,51 +559,54 @@ files), but a command that drops build artifacts in a repo with a thin
 
 ## Repository processing
 
-### Bug: a failed fetch carries on against stale refs
+### Reclassify the pre-flight outcomes as failures
 
-**High, first of the band and next up** — a wrong skip made on stale data, plus
-repos left dirty by a push that was never going to work. It goes ahead of *Make
-`--verbose` actually verbose* because both rewrite `fetchOrigin`, and this one
-deletes the warning that item would otherwise convert into a trace line.
+**High, before *a run with failed repos still exits 0*** — that item maps
+`outcomeFailed` to exit 2, so landing it first would ship the codes computed from
+the wrong classification.
 
-`fetchOrigin` (`git.go`) discards the error, writes `Could not fetch origin for
-<repo>; using local refs.` into the capture, and continues. Its comment argues
-stale refs beat no run at all — but every path through `processRepo` ends in a
-push and a pull request, so there is no local-only run being preserved. The
-failure is only deferred to a more expensive place.
+*A failure is a repo you will have to run again for* in
+[`design-notes.md`](design-notes.md) is new, and `preflight` predates it: every
+condition that ends a repo there is an `outcomeSkipped` today. Under the rule
+only one of them still is.
 
-**The push was going to fail too.** Fetch and push reach the same remote over the
-same transport with the same credentials, so an unreachable host, an expired
-credential helper, a revoked key or a renamed repo fails both. Continuing means
-running the user's command, staging and committing before finding that out — and
-*A failed repo is not cleaned up at all* then leaves the repo standing on the
-working branch with a commit on it. Failing in `preflight` touches nothing.
+| condition | now | wanted |
+| --- | --- | --- |
+| non-GitHub remote / no `origin` | skip | skip |
+| working tree not clean | skip | **fail** |
+| could not determine default branch | skip | **fail** |
+| not on a branch (detached HEAD) | skip | **fail** |
+| branch already exists locally / on origin | skip | **fail** |
+| could not fetch origin | fail | fail |
 
-**`--prune` is a correctness dependency, not a freshness nicety.**
-`branchLocation`'s own doc comment states the precondition: read it after the
-fetch, or a branch deleted upstream still looks like it exists. A silently failed
-fetch violates that, and the repo is skipped with `branch '<b>' already exists on
-origin` for a branch GitHub deleted on merge — a wrong answer, delivered as an
-ordinary `⏭️`, in the re-run-after-merge case. Under `--update` the same stale ref
-feeds row 5, which would create the local branch from a stale `origin/<branch>`.
+Only the first is a determination that nothing is wanted here: the target is not
+something mkprs can ever act on, and re-running changes nothing. The other four
+are all "the work is still wanted and mkprs could not get to it" — clean the
+tree, set `origin/HEAD`, check out a branch, deal with the existing branch, then
+run again. `command made no changes` in `commitAndPush` is the only other skip
+left, and it is the earned one: the command ran and produced nothing.
 
-The stale fork point is the least of it. GitHub diffs a pull request against the
-merge base, so an old base does not inflate the diff by itself; it costs a
-conflict only where the command's changes overlap what landed upstream meanwhile.
+**"Branch already exists" is the one worth arguing about**, because on origin it
+usually *is* a previous run's PR and so genuinely nothing to do. But mkprs is
+inferring that from a name. It could equally be a different command's branch, or
+one a colleague pushed, and nothing local distinguishes them — so it cannot be a
+determination, only a guess. `--update` is where this gets a real answer; see *On
+`branchAhead` functionality*.
 
-**Fail, not skip**, though every other `preflight` exit is a skip. A skip means a
-filter did its job, and under *a run with failed repos still exits 0* it maps to
-exit 0 — so a dropped VPN would report forty skips and exit successfully, which
-is the silent batch failure that item exists to remove.
+The reason lines get re-read as part of this, since a `❌` promises to say what
+would unblock it. `could not determine default branch` is the weakest: after a
+successful fetch it is a fact about the remote, so `no default branch on origin`
+names the fact, and `git remote set-head origin -a` is the fix worth naming.
 
-`fetchOrigin` then loses its `repoName` parameter, since the reason line already
-carries the name through the reporter, and returns an error for `preflight` to
-turn into the failure. The warning text goes with it, which removes the one place
-mkprs writes its own prose into the capture — so there is nothing left there for
-*Make `--verbose` actually verbose* to reroute.
+**`--stop-on-failure` widens with it**, deliberately. It stops for a wrong
+command and a wrong starting state alike, which is the same question — will this
+run have to happen again? A dirty repo aborting the run is the flag working, not
+a false positive.
 
-**No `--no-fetch` escape hatch.** It would reintroduce every hazard above on
-purpose, and the offline run it implies cannot open a pull request anyway.
+`isCleanTree` (`git.go`) folds a git error into "not clean" — `err == nil && out
+== ""` — so a broken `status` reports as a dirty tree. Both are failures now, so
+nothing is misreported to the user, but the reason line names the wrong cause.
+Worth splitting while the call site is open.
 
 ### Bug: cleanup can fail silently after a successful run
 
@@ -656,9 +667,10 @@ the other:
 | 1 | usage: bad arguments, an uninterpretable target, over `--max-repos` — no repo was touched |
 | 2 | the run happened; at least one repo failed |
 
-**Skips stay 0.** "No changes to commit", "working tree not clean", "no GitHub
-remote", and every other `⏭️` is a normal outcome of a filter doing its job, not
-a failure. Only `outcomeFailed` sets the code — which is the same test
+**Skips stay 0**, and under *a failure is a repo you will have to run again for*
+in [`design-notes.md`](design-notes.md) the code needs no policy of its own: a
+`⏭️` means mkprs determined there was nothing to do, so there is nothing for a
+wrapper to retry. Only `outcomeFailed` sets the code — which is the same test
 `--stop-on-failure` already makes in `processAll`.
 
 **`--stop-on-failure` returns 2 as well.** The flag changes how much of the run
@@ -861,7 +873,7 @@ The actual offenders, all `internal/mkprs`:
 |---|---|---|
 | `outcome.go` field | `outcomeFailed.c` | `output` |
 | `mkprs.go` field | `app.errw` | `errOut` |
-| `git.go` params | `gitTo(…, w io.Writer)`, `gitErrTo(…, w)`, `fetchOrigin(…, w)`, `restoreRepo(…, w)` | `log` |
+| `git.go` params | `gitTo(…, w io.Writer)`, `gitErrTo(…, w)`, `restoreRepo(…, w)` | `log` |
 | `git.go` param | `resolveBase(repoPath, dflt)` | `defaultBranch` |
 | `run.go` params | `c *capture`, in all six of `processRepo`, `openPR`, `preflight`, `cleanup`, `runCommand`, `commitAndPush` | `output` |
 | `cli.go` param | `printUsage(w io.Writer, fs *pflag.FlagSet)` | `out`, `flags` |
