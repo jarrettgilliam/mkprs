@@ -559,9 +559,9 @@ files), but a command that drops build artifacts in a repo with a thin
 
 ## Repository processing
 
-### Bug: cleanup can fail silently after a successful run
+### Cleanup can fail silently after a successful run
 
-**High** — a repo left somewhere the user did not put it, under a `✅` that says
+**High, after --verbose** — a repo left somewhere the user did not put it, under a `✅` that says
 everything went fine.
 
 `restoreRepo` discards both of its errors for `git checkout` and `git branch -D`
@@ -573,28 +573,6 @@ is mkprs tidying up after itself, and its failure does not retract any of that.
 Nor does it get a summary counter: the three must keep summing to the repo count,
 and this is not a fourth kind of outcome.
 
-**But say so on stdout, under the repo's result line.** It is a fact about where
-the repo was left, which is what stdout carries, and it is the one thing the user
-has to act on:
-
-```
-✅ acme-web   PR created  https://github.com/acme/web/pull/42
-   left on 'bump-deps'; could not restore 'main'
-```
-
-Terse in quiet mode, naming the branch and what would fix it. The underlying git
-error stays under `-v`, where `restoreRepo`'s output already goes once *Make
-`--verbose` actually verbose* lands — so the two halves need no coordination.
-Same shape as `reportIgnored`, which prints the fact always and the detail only
-under `-v`; unlike that one it is stdout, because a pre-run notice about arguments
-and a conclusion about a repo are not the same kind of line.
-
-**The named result is the seam.** `cleanup` runs in a defer that fires before
-`processRepo` returns, so `defer func() { res = a.cleanup(res, …) }()` lets it
-hand back an annotated outcome — `res` is already named for exactly this reason.
-Skips clean up too, so both `outcomeSuccess` and `outcomeSkipped` can carry the
-note.
-
 ## Discovery & safety limits
 
 The timeout is a safety net, so it **ships with a default on**, as `--max-repos`
@@ -604,7 +582,7 @@ they did not know it would. Opt-out, not opt-in.
 
 ### Per-repo command timeout, defaulting to 10 minutes
 
-**High** — one `exec.CommandContext` in `runCommand`, against a run that otherwise
+**High, do this first** — one `exec.CommandContext` in `runCommand`, against a run that otherwise
 stalls forever with no output.
 
 One hung command stalls the whole run with no feedback, and serial execution
