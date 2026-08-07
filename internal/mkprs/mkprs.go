@@ -10,11 +10,11 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// Exit codes. A run that merely had failing repos still exits 0: the result
-// lines and the closing summary carry that information.
+// Exit codes
 const (
-	exitOK    = 0
-	exitUsage = 1
+	exitOK      = 0 // every repository succeeded or was skipped, or --help was used
+	exitUsage   = 1 // usage: bad arguments, an unusable target, or more repos than --max-repos -- no repository was touched
+	exitFailure = 2 // the run happened and at least one repository failed, with or without -s
 )
 
 // app is one run's wiring: what to do, where to write, how to open PRs. It
@@ -69,8 +69,7 @@ func (a *app) run() int {
 		return exitUsage
 	}
 
-	a.processAll(repos)
-	return exitOK
+	return a.processAll(repos)
 }
 
 // prepare checks what can be checked without touching a repo and fills in the
@@ -133,8 +132,9 @@ func (a *app) checkRepoCount(found int) error {
 		found, plural(found, "repository", "repositories"), a.cfg.maxRepos, found)
 }
 
-// processAll runs every repo in turn and prints the closing summary.
-func (a *app) processAll(repos []string) {
+// processAll runs every repo in turn, prints the closing summary, and returns
+// the run's exit code.
+func (a *app) processAll(repos []string) int {
 	rep := newReporter(a.out, repos)
 
 	for i, repoPath := range repos {
@@ -164,6 +164,12 @@ func (a *app) processAll(repos []string) {
 	}
 
 	rep.summary()
+
+	if rep.failed > 0 {
+		return exitFailure
+	}
+
+	return exitOK
 }
 
 // reportIgnored accounts for arguments the run discarded. Naming each of them

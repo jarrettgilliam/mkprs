@@ -285,6 +285,8 @@ func TestParseArgsHelp(t *testing.T) {
 				"Everything after -- is the command",
 				"-b, --branch",
 				"-v, --verbose",
+				"Exit codes:",
+				"at least one repository failed",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("usage missing %q\n%s", want, out)
@@ -308,7 +310,9 @@ func TestParseArgsMaxReposDefaultsOn(t *testing.T) {
 }
 
 // Run owns the exit codes, so they are asserted here rather than through main.
-func TestRunExitCodes(t *testing.T) {
+// This half covers the runs that end before a repo is touched; the codes that
+// depend on how the repos went are in TestRunExitCodesFromRepoOutcomes.
+func TestRunExitCodesBeforeAnyRepo(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {

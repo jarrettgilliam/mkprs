@@ -375,9 +375,8 @@ func TestRunRefusesABranchSwitch(t *testing.T) {
 
 			got := run(t, prs, []string{f.targets, "-b", "b"}, tt.command(t)...)
 
-			// One repo failing is not fatal to the run; the ❌ line carries it.
-			if got.code != exitOK {
-				t.Errorf("exit code = %d, want %d", got.code, exitOK)
+			if got.code != exitFailure {
+				t.Errorf("exit code = %d, want %d", got.code, exitFailure)
 			}
 			if !strings.Contains(got.stdout, tt.want) {
 				t.Errorf("stdout = %q, want it to contain %q", got.stdout, tt.want)
@@ -543,8 +542,8 @@ func TestRunFailures(t *testing.T) {
 
 		got := run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "fail", "3", "it went wrong")...)
 
-		if got.code != exitOK {
-			t.Errorf("exit code = %d, want %d even when a repo fails", got.code, exitOK)
+		if got.code != exitFailure {
+			t.Errorf("exit code = %d, want %d", got.code, exitFailure)
 		}
 		if !strings.Contains(got.stdout, "❌ x command exited 3") {
 			t.Errorf("stdout = %q, want the exit code", got.stdout)
@@ -673,8 +672,9 @@ func TestRunStopOnFailure(t *testing.T) {
 
 		got := run(t, prs, []string{f.targets, "-b", "wip", "--stop-on-failure"}, helperCmd(t, "fail", "3", "it went wrong")...)
 
-		if got.code != exitOK {
-			t.Errorf("exit code = %d, want %d even when a repo fails", got.code, exitOK)
+		// -s changes how much of the run happens, not whether it succeeded.
+		if got.code != exitFailure {
+			t.Errorf("exit code = %d, want %d", got.code, exitFailure)
 		}
 		if !strings.Contains(got.stdout, "❌ a command exited 3") {
 			t.Errorf("stdout = %q, want the first repo's failure", got.stdout)
@@ -1811,6 +1811,59 @@ func TestCommitAndPush(t *testing.T) {
 			// A repo that ends here never reaches origin.
 			if f.remoteHasBranch("x", "b") {
 				t.Error("branch was pushed despite the repo ending early")
+			}
+		})
+	}
+}
+
+// The exit code answers "did it work?" for a caller that is not a human reading
+// the summary, so the interesting cases are the ones the result lines already
+// distinguish: a skip is not a failure, and one failure among successes is. The
+// runs that never reach a repo are in TestRunExitCodesBeforeAnyRepo (cli_test).
+func TestRunExitCodesFromRepoOutcomes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, f *fixture)
+		cmd   []string
+		want  int
+	}{
+		{
+			name:  "every repo succeeded",
+			setup: func(t *testing.T, f *fixture) { f.repo("a"); f.repo("b") },
+			cmd:   []string{"write", "file.txt", "changed"},
+			want:  exitOK,
+		},
+		{
+			name:  "a skip is not a failure",
+			setup: func(t *testing.T, f *fixture) { f.repo("a") },
+			cmd:   []string{"noop"},
+			want:  exitOK,
+		},
+		{
+			name: "one failure among successes",
+			setup: func(t *testing.T, f *fixture) {
+				f.repo("a")
+				dirty := f.repo("dirty")
+				writeFile(t, filepath.Join(dirty, "stray.txt"), "uncommitted")
+			},
+			cmd:  []string{"write", "file.txt", "changed"},
+			want: exitFailure,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := newFixture(t)
+			tt.setup(t, f)
+
+			got := run(t, &fakePR{}, []string{f.targets, "-b", "b"}, helperCmd(t, tt.cmd[0], tt.cmd[1:]...)...)
+
+			if got.code != tt.want {
+				t.Errorf("exit code = %d, want %d\n%s", got.code, tt.want, got.stdout)
 			}
 		})
 	}

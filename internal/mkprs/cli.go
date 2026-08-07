@@ -66,6 +66,12 @@ them, so nothing is lost and the repo itself shows which ones need attention.
 The run carries on after a failed repo unless -s is given, which leaves the
 remaining repos untouched.
 
+Exit codes:
+  0  every repository succeeded or was skipped, or --help was passed
+  1  usage: bad arguments, an unusable target, or more repos than --max-repos --
+     no repository was touched
+  2  the run happened and at least one repository failed, with or without -s
+
 Examples:
   # Bump NuGet dependencies everywhere
   mkprs ~/repos -b bump-deps -- dotnet outdated -u

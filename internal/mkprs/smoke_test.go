@@ -118,6 +118,24 @@ func TestBinaryEndToEnd(t *testing.T) {
 	}
 }
 
+// A failing command never reaches gh either, so the shipped binary can show
+// that a run with a failed repo exits non-zero -- the half of the exit-code
+// policy that only a real process can prove.
+func TestBinaryExitsTwoOnFailure(t *testing.T) {
+	t.Parallel()
+
+	bin := buildBinary(t)
+	f := newFixture(t)
+	f.repo("x")
+
+	args := append([]string{f.targets, "-b", "b", "--"}, helperCmd(t, "fail", "3", "nope")...)
+	out, err := exec.Command(bin, args...).CombinedOutput()
+
+	if got := exitCodeOf(err); got != 2 {
+		t.Errorf("exit code = %d, want 2\n%s", got, out)
+	}
+}
+
 // moduleRoot is where go build must run: the package under test lives two
 // directories down from the module root.
 func moduleRoot() string { return filepath.Join("..", "..") }

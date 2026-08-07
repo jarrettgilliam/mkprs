@@ -597,45 +597,6 @@ note.
 
 ## Command execution
 
-### Bug: a run with failed repos still exits 0
-
-**High** — a batch tool that never reports failure cannot be used from a script,
-and the fix is one counter and a constant.
-
-`exitOK` is returned from `run` no matter how the repos went, and the comment at
-the top of `mkprs.go` states that as the policy: the result lines and the summary
-carry the information. They carry it to a human reading a terminal. `mkprs … &&
-notify`, a CI step, and any wrapper have nothing to test, so a run where fifteen
-repos failed is indistinguishable from one where none did.
-
-Three codes, so "nothing happened, fix your command line" stays distinguishable
-from "work was done and some of it failed" — a wrapper wants to retry one and not
-the other:
-
-| code | meaning |
-| ---- | ------- |
-| 0 | every repo succeeded or was skipped |
-| 1 | usage: bad arguments, an uninterpretable target, over `--max-repos` — no repo was touched |
-| 2 | the run happened; at least one repo failed |
-
-**Skips stay 0**, and under *a failure is a repo you will have to run again for*
-in [`design-notes.md`](design-notes.md) the code needs no policy of its own: a
-`⏭️` means mkprs determined there was nothing to do, so there is nothing for a
-wrapper to retry. Only `outcomeFailed` sets the code — which is the same test
-`--stop-on-failure` already makes in `processAll`.
-
-**`--stop-on-failure` returns 2 as well.** The flag changes how much of the run
-happens, not whether it succeeded, and a code that differed by it would answer
-"was -s passed?" instead of "did it work?".
-
-`processAll` returns nothing today; it needs to report whether any repo failed —
-`reporter` already counts it — and `run` maps that to `exitFailure`. The comment
-above the `exit*` constants states the opposite of all this and goes with it.
-
-**The codes belong in the usage text**, since nothing else would tell a user
-writing a script that 1 and 2 mean different things. `usageTail` (`cli.go`) is
-where it goes, near the paragraph that already explains what `-s` does to a run.
-
 ### Bug: `runCommand` reports an exit code the command never had
 
 **High** — a failure line that names the wrong cause, fixed in one function.
