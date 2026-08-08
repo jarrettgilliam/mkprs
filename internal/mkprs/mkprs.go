@@ -144,16 +144,12 @@ func (a *app) processAll(repos []string) int {
 		res := a.processRepo(repoPath, c)
 		c.flush()
 
-		// Currently unreachable, but an accidental `return nil` would compile
-		// and calling a method on a nil interface panics -- a programmer error
-		// should not take down a run that is 20 repos deep.
+		// Prevent panic from calling method on nil outcome
 		if res == nil {
 			res = fail("internal error: processRepo returned no outcome", c)
 		}
 		res.report(rep, name)
 
-		// -s is for the run whose command is simply wrong: the first failure is
-		// the diagnosis.
 		if _, broke := res.(outcomeFailed); broke && a.cfg.stopOnFailure {
 			if left := len(repos) - i - 1; left > 0 {
 				fmt.Fprintln(a.out, "Stopped at the first failure.")
