@@ -99,7 +99,11 @@ Notes that matter for the implementation:
   hatch for "I want to look at this properly".
 - **`a` is just a latch**, a bool that suppresses later prompts. `q` needs to
   stop the loop cleanly, letting the current repo's cleanup run.
-- Skips are reported as normal (`⏭️`), so the summary still adds up.
+- **`n` is a skip** (`⏭️`), so the summary still adds up. It is the one skip
+  mkprs does not determine for itself — the user answers "no pull request to
+  create here" at the prompt — so if this lands, *a failure is a repo you will
+  have to run again for* in [`design-notes.md`](design-notes.md) needs a line
+  saying a skip can be earned that way too.
 
 #### `e` — drop into a shell in the repo
 
@@ -255,9 +259,9 @@ If all the code and PR already exist on the server, tell the user that and skip.
 If code is pushed or a PR is created, tell the user that and report success.
 
 That skip is an earned one — everything the run would have done is already on the
-server, so there is genuinely nothing to do and no reason to come back. It is the
-second of only two, beside "command made no changes"; see *a failure is a repo
-you will have to run again for* in [`design-notes.md`](design-notes.md).
+server, so there is genuinely nothing to do and no reason to come back; see *a
+failure is a repo you will have to run again for* in
+[`design-notes.md`](design-notes.md).
 
 This fills in a functionality gaps. If the user command, stage, and commit all work,
 but push or PR creations fails (Due to poor network, auth failure, etc) the user
@@ -679,13 +683,12 @@ reads the *un-rewritten* config value, which is what makes this parseable.
   Response `.html_url` is the line mkprs prints today.
 - Reviewers are a **second** call —
   `POST /repos/{owner}/{repo}/pulls/{number}/requested_reviewers` — and labels
-  and assignees are a **third and a fourth**, on separate issues-API endpoints
-  (`POST /repos/{owner}/{repo}/issues/{number}/labels` and `…/assignees`), which
-  is one more reason the note in [`design-notes.md`](design-notes.md) declines
-  all three. `gh pr create` hides the fan-out behind one invocation, so the extra
-  PR fields get more involved here, and partial failure becomes possible: the PR
-  exists but the reviewer was not added. Prefer reporting success with a warning
-  over failing the repo.
+  and assignees would each be another, on separate issues-API endpoints
+  (`POST /repos/{owner}/{repo}/issues/{number}/labels` and `…/assignees`).
+  `gh pr create` hides the fan-out behind one invocation, so the extra PR fields
+  get more involved here, and partial failure becomes possible: the PR exists but
+  the reviewer was not added. Prefer reporting success with a warning over
+  failing the repo.
 - `422` usually means a PR already exists for that head. That is a skip, not a
   failure — better than the current opaque `failed to create PR`.
 - Back off on `5xx` and on secondary rate limits, which arrive as **`403` or
