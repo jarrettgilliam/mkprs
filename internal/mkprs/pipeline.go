@@ -73,7 +73,7 @@ func (r *repoRun) preflight() (prep, outcome) {
 	// Fetch before any decision that reads a ref. --prune clears
 	// refs/remotes/origin/<branch> after a PR is merged and its branch deleted
 	// upstream; checking first would skip the repo on a ref that is only stale.
-	if err := r.gitTo("fetch", "origin", "--quiet", "--prune"); err != nil {
+	if err := r.git(fetch()).toLog().run(); err != nil {
 		return prep{}, r.fail("could not fetch origin")
 	}
 
@@ -168,14 +168,14 @@ func (r *repoRun) commitAndPush(p prep) outcome {
 		return r.fail(fmt.Sprintf("command left the repo on '%s', not '%s'", work, branch))
 	}
 
-	if err := r.gitTo("add", "-A"); err != nil {
+	if err := r.git(stageAll()).toLog().run(); err != nil {
 		return r.fail("could not stage changes")
 	}
 
 	// --quiet exits 0 when there is nothing staged. Nothing staged is not the
 	// same as nothing done: the command may have committed its own work.
-	if !r.gitOK("diff", "--cached", "--quiet") {
-		if err := r.gitTo("commit", "-q", "-m", r.a.cfg.message); err != nil {
+	if !r.git(nothingStaged()).ok() {
+		if err := r.git(commit(r.a.cfg.message)).toLog().run(); err != nil {
 			return r.fail("could not commit")
 		}
 	}
@@ -192,7 +192,7 @@ func (r *repoRun) commitAndPush(p prep) outcome {
 		return skip("command made no changes")
 	}
 
-	if err := r.gitTo("push", "-u", "origin", branch, "--quiet"); err != nil {
+	if err := r.git(push(branch)).toLog().run(); err != nil {
 		return r.fail(fmt.Sprintf("unable to push to origin/%s", branch))
 	}
 
@@ -208,7 +208,7 @@ func (r *repoRun) process() (res outcome) {
 		return res
 	}
 
-	if err := r.gitTo("checkout", "-b", r.a.cfg.branch, p.base, "--quiet"); err != nil {
+	if err := r.git(createBranch(r.a.cfg.branch, p.base)).toLog().run(); err != nil {
 		return r.fail("could not create branch")
 	}
 	// The branch exists from here on, so the repo needs restoring however we leave.

@@ -289,7 +289,7 @@ It also forecloses a hazard `--update` would otherwise introduce. `-k` leaves th
 repo standing *on* the branch, so a later run has `startBranch == branch`;
 `repo.restore` would then no-op the checkout and try to `git branch -D` the branch
 it is standing on, which git refuses — and the refusal would go unseen, since
-`gitErrTo`'s error is discarded. That state is unreachable today only because
+the `deleteBranch` run's error is discarded. That state is unreachable today only because
 `preflight` fails the repo before it gets there ("branch already exists
 locally"); `--update` is exactly the change that lets it through. Under this
 rule the delete is never attempted.
@@ -351,11 +351,11 @@ screen, as it happens.
 
 The gaps, in the order they bite:
 
-- **`git`/`gitOK` bypass the capture entirely.** `cmd.Output()` sends stdout to
-  a buffer and stderr into the error, so neither stream can reach the console at
-  any verbosity. That is `originURL`, `isCleanTree`, `defaultBranch`,
-  `branchLocation`, `resolveBase`, `headBranch`, `branchAhead`, and the
-  `diff --cached --quiet` check in `commitAndPush` — i.e. every filter that
+- **`text`/`ok` bypass the capture entirely.** Neither redirects a stream, so
+  `run` buffers stdout for the return value and stderr for the error, and
+  neither can reach the console at any verbosity. That is `originURL`,
+  `isCleanTree`, `defaultBranch`, `branchLocation`, `resolveBase`, `headBranch`,
+  `branchAhead`, and the `nothingStaged` check in `commitAndPush` — i.e. every filter that
   decides a repo's fate. Their stdout *is* the return value, which is the
   argument for swallowing it, but it is also the answer the user wants:
   `status --porcelain` is precisely the list of files that failed a repo as
@@ -374,34 +374,37 @@ The gaps, in the order they bite:
   fold git's first stderr line into an error so a reason line can carry it, which
   is the thing being ruled out. No production code consumes it either —
   `defaultBranch` and `branchAhead` return a `bool`, so the error dies inside
-  the helper — and once `git` buffers stderr to echo it under `-v`, stderr has
-  the full text anyway. Keeping it would leave a helper whose only reader is a
-  rule against reading it.
+  the helper — and once `text` echoes the stderr it already buffers under `-v`,
+  stderr has the full text anyway. Keeping it would leave a helper whose only
+  reader is a rule against reading it.
 
   The failing command's stderr that the replay needs — see the next bullet — does
   not bring it back. `gitError` put the text inside `err.Error()`, so every
   consumer carried it whether or not it wanted it. What replaces it is a value
-  only the replay reads: `failure` gaining a detail argument, or `gitTo` returning
+  only the replay reads: `failure` gaining a detail argument, or `run` returning
   the stderr it collected alongside the error.
 
   **`TestGitErrorCarriesStderr` goes with it.** It is the one thing that reads
   the enriched text: stubbing `gitError` to return `err` unchanged fails that
-  test and no other, which is what "nothing consumes it" was measured by. Replace
+  test and no other, which is what "nothing consumes it" was measured by.
+  `TestLoggedErrorDoesNotRepeatStderr` beside it asserts the half that survives —
+  a logged complaint stays out of the error — and becomes the whole rule once
+  there is no folding left to switch off. Replace
   it with tests for the two routes that succeed it: git's stderr reaches stderr
   under `-v`, and a failing `push` or `commit` has its stderr replayed under the
   `❌` while the reason line beside it stays plain.
-- **`--quiet`/`-q` on the mutating commands.** `checkout -b … --quiet`,
-  `commit -q`, `push … --quiet` and `fetch … --quiet` all route through `gitTo`,
-  so they would stream — the flag is what silences them. Under `-v` that costs
-  commit's "3 files changed, 40 insertions", checkout's "Switched to a new
-  branch", and push's `remote:` lines.
+- **`--quiet`/`-q` on the mutating commands.** `createBranch`, `commit`, `push`
+  and `fetch` all route through `toLog()`, so they would stream — the flag is
+  what silences them. Under `-v` that costs commit's "3 files changed, 40
+  insertions", checkout's "Switched to a new branch", and push's `remote:` lines.
 
-  **Stop passing the quiet flags altogether**, and decide the destination in one
+  **Stop passing the quiet flags altogether** — they live in those four
+  constructors in `gitcmds.go` — and decide the destination in one
   place instead: under `-v` both streams go to stderr, and otherwise both are
-  discarded. That is simpler than making four call sites conditional, and it puts
-  every internal git command on the same rule as the interrogating helpers above
+  discarded. That is simpler than making four constructors conditional, and it puts
+  every internal git command on the same rule as the interrogating terminals above
   — mkprs's own output is either on screen under `-v` or nowhere. `repo.log()` is
-  that one place: every git helper already routes its streams through it, so the
+  that one place: `toLog` and `errToLog` already route their streams through it, so the
   rule is written once there rather than at each call site.
 
   **The workflow's output reaches `c.buf`; bookkeeping's does not.** mkprs
@@ -425,7 +428,7 @@ The gaps, in the order they bite:
   here; see *cleanup can fail silently after a successful run*.
 
   So this bullet narrows what reaches the replay rather than emptying it.
-  `gitTo` sends both streams to the capture today, and that is worth keeping:
+  `toLog` sends both streams to the capture today, and that is worth keeping:
   `unable to push to origin/<branch>` is the same sentence for a protected
   branch, a rejected pre-receive hook, an expired credential, a non-fast-forward
   and an unreachable host, and only `remote: error: GH006: Protected branch
@@ -445,7 +448,7 @@ The gaps, in the order they bite:
   Do not reach for `--progress` on fetch/push to force the transfer meter back:
   git suppresses it off a tty for good reason, and it is noise rather than
   information.
-- **`git branch -D`'s stdout is discarded** by `gitErrTo` as noise, but
+- **`git branch -D`'s stdout is discarded** by `errToLog` as noise, but
   "Deleted branch bump-deps (was abc1234)" carries the only record of what was
   just thrown away. Under `-v` it should print.
 - **The user's command goes to stderr** in --verbose mode only,
@@ -474,9 +477,9 @@ The gaps, in the order they bite:
 **Every command mkprs runs is printed to stderr, prefixed with `$`, before it
 runs** — the internal git invocations, `gh`, and the user's command alike. There
 is no category that runs silently under `-v`: if a process is started, the line
-that started it is on screen above its output. `repo.gitCommand` is the one place
-every git invocation is built, so that is where the printing belongs rather than
-at each call site.
+that started it is on screen above its output. `gitRun.run` is the one place
+every git invocation is built and started — `ok` and `text` both funnel through
+it — so that is where the printing belongs rather than at each call site.
 
 Two kinds of line, kept visually distinct, so a reader can tell mkprs's narration
 from the output it is narrating:

@@ -7,41 +7,46 @@ import (
 	"testing"
 )
 
-// The helpers are told apart by what they do with the two streams, so that is
-// what is worth asserting: one command, four shapes.
-func TestGitHelperStreams(t *testing.T) {
+// A ref that does not exist: stdout empty, stderr a complaint, exit non-zero.
+// Without --quiet, so that there is a complaint to follow.
+var badRef = gitArgs{"rev-parse", "--verify", "refs/heads/nope"}
+
+// The builder's whole point is that the two axes are independent, so that is
+// what is worth asserting: one command, each shape.
+func TestGitRunStreams(t *testing.T) {
 	t.Parallel()
 
-	// A ref that does not exist: stdout empty, stderr a complaint, exit non-zero.
-	bad := []string{"rev-parse", "--verify", "refs/heads/nope"}
-
-	t.Run("git returns stdout and hides stderr", func(t *testing.T) {
-		t.Parallel()
-
-		f := newFixture(t)
-		out, err := at(f.repo("x")).git("rev-parse", "--abbrev-ref", "HEAD")
-		if err != nil || out != "main" {
-			t.Errorf("git = %q, %v; want main, nil", out, err)
-		}
-	})
-
-	// gitTo is the streaming shape: both halves reach the capture.
-	t.Run("gitTo writes both streams", func(t *testing.T) {
+	t.Run("text returns stdout and hides stderr", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
 		out := newCapture("x", false, io.Discard)
 		r := repo{path: f.repo("x"), output: out}
-		if err := r.gitTo(bad...); err == nil {
-			t.Fatal("gitTo err = nil, want a failure")
+		got, err := r.git(currentHeadRef()).text()
+		if err != nil || got != "main" {
+			t.Errorf("text = %q, %v; want main, nil", got, err)
+		}
+		if !out.empty() {
+			t.Errorf("output = %q, want an unredirected run to leave the capture alone", out.String())
+		}
+	})
+
+	t.Run("toLog writes both streams", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		out := newCapture("x", false, io.Discard)
+		r := repo{path: f.repo("x"), output: out}
+		if err := r.git(badRef).toLog().run(); err == nil {
+			t.Fatal("run err = nil, want a failure")
 		}
 		if !strings.Contains(out.String(), "fatal:") {
 			t.Errorf("output = %q, want git's complaint", out.String())
 		}
 	})
 
-	// gitErrTo exists for `git branch -D`, whose stdout is noise.
-	t.Run("gitErrTo writes stderr only", func(t *testing.T) {
+	// errToLog exists for `git branch -D`, whose stdout is noise.
+	t.Run("errToLog writes stderr only", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
@@ -50,19 +55,32 @@ func TestGitHelperStreams(t *testing.T) {
 
 		out := newCapture("x", false, io.Discard)
 		r := repo{path: dir, output: out}
-		if err := r.gitErrTo("branch", "-D", "work"); err != nil {
-			t.Fatalf("gitErrTo err = %v, want nil", err)
+		if err := r.git(deleteBranch("work")).errToLog().run(); err != nil {
+			t.Fatalf("run err = %v, want nil", err)
 		}
 		if !out.empty() {
 			t.Errorf("output = %q, want stdout discarded", out.String())
 		}
 
 		// Same command again, now that the branch is gone.
-		if err := r.gitErrTo("branch", "-D", "work"); err == nil {
-			t.Fatal("gitErrTo err = nil, want a failure")
+		if err := r.git(deleteBranch("work")).errToLog().run(); err == nil {
+			t.Fatal("run err = nil, want a failure")
 		}
 		if !strings.Contains(out.String(), "not found") {
 			t.Errorf("output = %q, want git's complaint", out.String())
+		}
+	})
+
+	t.Run("ok reports the exit status", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		dir := f.repo("x")
+		if !at(dir).git(localBranchExists("main")).ok() {
+			t.Error("ok = false for a branch that exists")
+		}
+		if at(dir).git(badRef).ok() {
+			t.Error("ok = true for a ref that does not exist")
 		}
 	})
 }
@@ -73,12 +91,30 @@ func TestGitErrorCarriesStderr(t *testing.T) {
 	t.Parallel()
 
 	f := newFixture(t)
-	_, err := at(f.repo("x")).git("rev-parse", "--verify", "refs/heads/nope")
+	_, err := at(f.repo("x")).git(badRef).text()
 	if err == nil {
-		t.Fatal("git err = nil, want a failure")
+		t.Fatal("text err = nil, want a failure")
 	}
 	if !strings.Contains(err.Error(), "fatal:") {
 		t.Errorf("err = %q, want git's stderr included", err)
+	}
+}
+
+// The other half of that rule: once the complaint is in the capture, the error
+// must not repeat it, or a failed repo prints it twice.
+func TestLoggedErrorDoesNotRepeatStderr(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	out := newCapture("x", false, io.Discard)
+	r := repo{path: f.repo("x"), output: out}
+
+	err := r.git(badRef).toLog().run()
+	if err == nil {
+		t.Fatal("run err = nil, want a failure")
+	}
+	if strings.Contains(err.Error(), "fatal:") {
+		t.Errorf("err = %q, want git's complaint left to the capture", err)
 	}
 }
 

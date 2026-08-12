@@ -1,6 +1,7 @@
 package mkprs
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -26,51 +27,63 @@ func (r repo) log() io.Writer {
 	return r.output
 }
 
-// gitCommand builds a git invocation rooted at the repo. The helpers below all
-// start here and differ only in what they do with the two streams.
-func (r repo) gitCommand(args ...string) *exec.Cmd {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = r.path
-	return cmd
+func (r repo) git(args gitArgs) *gitRun {
+	return &gitRun{repo: r, args: args}
 }
 
-// git runs a git command in the repo and returns its trimmed stdout. Stderr
-// does not reach the caller's output, but does reach the error -- see gitError.
-func (r repo) git(args ...string) (string, error) {
-	out, err := r.gitCommand(args...).Output()
-	return strings.TrimSpace(string(out)), gitError(err)
+type gitRun struct {
+	repo
+	args           gitArgs
+	stdout, stderr io.Writer
 }
 
-// gitOK reports whether a git command succeeded, ignoring all of its output.
-func (r repo) gitOK(args ...string) bool {
-	_, err := r.git(args...)
-	return err == nil
+func (g *gitRun) toLog() *gitRun {
+	g.stdout, g.stderr = g.log(), g.log()
+	return g
 }
 
-// gitTo runs a git command with both streams sent to the repo's log.
-func (r repo) gitTo(args ...string) error {
-	cmd := r.gitCommand(args...)
-	cmd.Stdout = r.log()
-	cmd.Stderr = r.log()
-	return cmd.Run()
+func (g *gitRun) errToLog() *gitRun {
+	g.stderr = g.log()
+	return g
 }
 
-// gitErrTo runs a git command with stdout discarded and stderr sent to the
-// repo's log, for the commands whose output is noise but whose complaints are
-// not.
-func (r repo) gitErrTo(args ...string) error {
-	cmd := r.gitCommand(args...)
-	cmd.Stderr = r.log()
-	return cmd.Run()
+// run runs the command, discarding whatever stream was not redirected.
+// Unredirected stderr is buffered rather than discarded so the error can carry
+// git's own words; redirected, the buffer stays empty and gitError leaves the
+// error alone, since repeating a complaint already in the capture prints it
+// twice.
+func (g *gitRun) run() error {
+	var complaint bytes.Buffer
+	stderr := g.stderr
+	if stderr == nil {
+		stderr = &complaint
+	}
+
+	cmd := exec.Command("git", g.args...)
+	cmd.Dir = g.path
+	cmd.Stdout, cmd.Stderr = g.stdout, stderr
+
+	return gitError(cmd.Run(), complaint.String())
 }
 
-// gitError folds git's own stderr into the error text. exec.Cmd.Output already
-// captures stderr into ExitError.Stderr, but Error() reports only "exit status
-// 1", so a caller that wraps the error loses the one line explaining it.
-func gitError(err error) error {
+func (g *gitRun) ok() bool { return g.run() == nil }
+
+// text returns the command's trimmed stdout. Stderr reaches the error rather
+// than the caller's output unless it was redirected -- see run.
+func (g *gitRun) text() (string, error) {
+	var out bytes.Buffer
+	g.stdout = &out
+	err := g.run()
+	return strings.TrimSpace(out.String()), err
+}
+
+// gitError folds git's own stderr into the error text: an *exec.ExitError
+// reports only "exit status 1", so a caller that wraps it loses the one line
+// explaining it.
+func gitError(err error, stderr string) error {
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
-		if msg := strings.TrimSpace(string(exit.Stderr)); msg != "" {
+		if msg := strings.TrimSpace(stderr); msg != "" {
 			return fmt.Errorf("%w: %s", err, msg)
 		}
 	}
@@ -89,7 +102,7 @@ func gitError(err error) error {
 func validateBranchName(branch string) error {
 	// check-ref-format reads only its argument, so there is no repo to run it
 	// in; the zero repo leaves cmd.Dir unset, i.e. the process's own cwd.
-	if strings.HasPrefix(branch, "-") || !(repo{}).gitOK("check-ref-format", "refs/heads/"+branch) {
+	if strings.HasPrefix(branch, "-") || !(repo{}).git(checkFormat(branch)).ok() {
 		return fmt.Errorf("invalid branch name %q (see 'git help check-ref-format')", branch)
 	}
 	return nil
@@ -97,7 +110,7 @@ func validateBranchName(branch string) error {
 
 // originURL is the configured (not insteadOf-rewritten) URL of origin.
 func (r repo) originURL() (string, error) {
-	return r.git("config", "--get", "remote.origin.url")
+	return r.git(remoteOriginURL()).text()
 }
 
 // isGitHubRepo reports whether origin points at github.com, and the reason when
@@ -116,7 +129,7 @@ func (r repo) isGitHubRepo() (bool, string) {
 // isCleanTree reports whether the working tree has no changes, and whether the
 // question could be answered at all.
 func (r repo) isCleanTree() (clean, ok bool) {
-	out, err := r.git("status", "--porcelain")
+	out, err := r.git(status()).text()
 	if err != nil {
 		return false, false
 	}
@@ -126,11 +139,11 @@ func (r repo) isCleanTree() (clean, ok bool) {
 // defaultBranch resolves the repo's default branch, preferring origin/HEAD and
 // falling back to the conventional names.
 func (r repo) defaultBranch() (string, bool) {
-	if name, err := r.git("symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil && name != "" {
+	if name, err := r.git(originHeadRef()).text(); err == nil && name != "" {
 		return strings.TrimPrefix(name, "origin/"), true
 	}
 	for _, candidate := range []string{"main", "master"} {
-		if r.gitOK("rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+candidate) {
+		if r.git(originBranchExists(candidate)).ok() {
 			return candidate, true
 		}
 	}
@@ -144,10 +157,10 @@ func (r repo) defaultBranch() (string, bool) {
 // last fetch: call this after a pruning fetch, or a branch deleted upstream
 // still looks like it exists.
 func (r repo) branchLocation(branch string) string {
-	if r.gitOK("rev-parse", "--verify", "--quiet", "refs/heads/"+branch) {
+	if r.git(localBranchExists(branch)).ok() {
 		return "locally"
 	}
-	if r.gitOK("rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch) {
+	if r.git(originBranchExists(branch)).ok() {
 		return "on origin"
 	}
 	return ""
@@ -156,7 +169,7 @@ func (r repo) branchLocation(branch string) string {
 // resolveBase prefers the remote-tracking ref so new branches start from what
 // origin has, not from a stale local branch.
 func (r repo) resolveBase(defaultBranch string) string {
-	if r.gitOK("rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+defaultBranch) {
+	if r.git(originBranchExists(defaultBranch)).ok() {
 		return "origin/" + defaultBranch
 	}
 	return defaultBranch
@@ -165,7 +178,7 @@ func (r repo) resolveBase(defaultBranch string) string {
 // headBranch is the checked-out branch, and whether HEAD is on a branch at all.
 // symbolic-ref fails on a detached HEAD, which is the distinction callers need.
 func (r repo) headBranch() (string, bool) {
-	name, err := r.git("symbolic-ref", "--short", "HEAD")
+	name, err := r.git(currentHeadRef()).text()
 	if err != nil || name == "" {
 		return "", false
 	}
@@ -176,7 +189,7 @@ func (r repo) headBranch() (string, bool) {
 // whether the question could be answered at all. This is what decides that a
 // repo has something to open a PR for.
 func (r repo) branchAhead(base, branch string) (ahead, ok bool) {
-	out, err := r.git("rev-list", "--count", base+".."+branch)
+	out, err := r.git(commitsAhead(base, branch)).text()
 	if err != nil {
 		return false, false
 	}
@@ -189,7 +202,7 @@ func (r repo) branchAhead(base, branch string) (ahead, ok bool) {
 // those edits stranded on startBranch after the branch that explains them is
 // gone. Callers that do not want the branch deleted must not call this at all.
 func (r repo) restore(startBranch, branch string) {
-	_ = r.gitTo("checkout", startBranch, "--quiet")
+	_ = r.git(checkoutBranch(startBranch)).toLog().run()
 	// The "Deleted branch" line is noise, but errors belong in the capture.
-	_ = r.gitErrTo("branch", "-D", branch)
+	_ = r.git(deleteBranch(branch)).errToLog().run()
 }
