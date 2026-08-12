@@ -1,31 +1,26 @@
-# Graph Report - mkprs  (2026-08-12)
+# Graph Report - .  (2026-08-12)
 
 ## Corpus Check
-- 27 files · ~31,120 words
-- Verdict: corpus is large enough that graph structure adds value.
+- Corpus is ~31,120 words - fits in a single context window. You may not need a graph.
 
 ## Summary
-- 286 nodes · 811 edges · 11 communities (10 shown, 1 thin omitted)
-- Extraction: 67% EXTRACTED · 32% INFERRED · 0% AMBIGUOUS · INFERRED: 263 edges (avg confidence: 0.8)
-- Token cost: 0 input · 0 output
-
-## Graph Freshness
-- Built from commit: `11b71419`
-- Run `git rev-parse HEAD` and compare to check if the graph is stale.
-- Run `graphify update .` after code changes (no API cost).
+- 279 nodes · 785 edges · 12 communities (11 shown, 1 thin omitted)
+- Extraction: 66% EXTRACTED · 34% INFERRED · 0% AMBIGUOUS · INFERRED: 266 edges (avg confidence: 0.8)
+- Token cost: 54,712 input · 0 output
 
 ## Community Hubs (Navigation)
-- testing.T
-- app
-- Design Decisions and Roadmap
-- capture
-- helper_test.go
-- parseArgs
-- gitArgs
-- TestDiscoverRepos
-- End-to-End Smoke Tests
-- Module Entry Point
-- pr.go
+- Git Behavior Tests
+- Git Command Layer
+- Design Decisions and Backlog
+- Output Capture and Run Pipeline
+- Outcome Model and Pipeline Steps
+- CLI Argument Parsing
+- Test Helpers and Fixtures
+- Report Rendering
+- PR Opening via gh
+- Repo Discovery
+- Binary Smoke Tests
+- Module Root Package
 
 ## God Nodes (most connected - your core abstractions)
 1. `newFixture()` - 48 edges
@@ -40,87 +35,91 @@
 10. `parseArgs()` - 14 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `branchAhead rework — success only when something was pushed or created` --semantically_similar_to--> `PRs always target the repo's own default branch`  [INFERRED] [semantically similar]
-  todo.md → design-decisions.md
-- `Delete gitError (and TestGitErrorCarriesStderr)` --semantically_similar_to--> `stdout is the report; stderr is everything else`  [INFERRED] [semantically similar]
-  todo.md → design-decisions.md
-- `Refuse the default branch as the working branch` --semantically_similar_to--> `A target is a repo or a place to find them`  [INFERRED] [semantically similar]
-  todo.md → design-decisions.md
-- `Per-repo command timeout, defaulting to 10 minutes` --conceptually_related_to--> `A failed repo is not cleaned up at all`  [AMBIGUOUS]
+- `--tracked-only staging` --conceptually_related_to--> `The capture holds the user's workflow, not mkprs's bookkeeping`  [AMBIGUOUS]
   todo.md → design-decisions.md
 - `main()` --calls--> `Run()`  [EXTRACTED]
   main.go → internal/mkprs/mkprs.go
+- `Refuse the default branch, before any repo is touched` --conceptually_related_to--> `PRs always target the repo's own default branch`  [INFERRED]
+  todo.md → design-decisions.md
+- `e — drop into a shell in the repo` --references--> `The command must leave the repo on mkprs's branch`  [EXTRACTED]
+  todo.md → design-decisions.md
+- `GitHub REST API notes` --conceptually_related_to--> `A failure is a repo you will have to run again for`  [INFERRED]
+  todo.md → design-decisions.md
 
 ## Import Cycles
 - None detected.
 
 ## Hyperedges (group relationships)
-- **Replacing gh with the REST API** — todo_replace_gh_with_api, todo_token_discovery, todo_token_redaction, todo_api_notes, todo_gh_migration, design_notes_propener_seam [EXTRACTED 1.00]
-- **Output stream discipline: report, capture, trace** — design_notes_stdout_is_the_report, design_notes_capture_holds_user_workflow, todo_make_verbose_verbose, todo_trace_lines, todo_delete_giterror, todo_token_redaction [EXTRACTED 1.00]
-- **--update branch-state decision flow** — todo_update_flag, todo_when_to_continue_table, todo_branch_start_by_row, todo_cleanup_restores_branches, todo_opening_versus_updating_pr, design_notes_never_moves_a_branch [EXTRACTED 1.00]
+- **--update branch state machine (row table, base selection, cleanup, PR create-or-update)** — todo_update_flag, todo_when_to_continue_table, todo_where_the_branch_starts_from_by_row, todo_cleanup_restores_the_branches_the_repo_had, todo_opening_versus_updating_the_pull_request, todo_branchahead, design_decisions_never_moves_branch_to_commit_it_did_not_create [EXTRACTED 1.00]
+- **Output stream discipline: report on stdout, capture and trace on stderr** — design_decisions_stdout_is_the_report_stderr_is_everything_else, design_decisions_capture_holds_the_users_workflow, design_decisions_execution_stays_serial, todo_make_verbose_actually_verbose, todo_mark_the_lines_that_only_exist_because_of_v, todo_delete_giterror [EXTRACTED 1.00]
+- **Replacing gh with the GitHub REST API** — todo_replace_gh_with_github_api, todo_token_discovery_authentication, todo_api_notes, todo_gh_migration, design_decisions_propener, design_decisions_tests_use_real_git [EXTRACTED 1.00]
 
-## Communities (11 total, 1 thin omitted)
+## Communities (12 total, 1 thin omitted)
 
-### Community 0 - "testing.T"
-Cohesion: 0.17
-Nodes (51): testing.T, TestBranchAhead(), TestBranchLocation(), TestDefaultBranch(), TestGitErrorCarriesStderr(), TestHeadBranch(), TestIsCleanTree(), TestIsCleanTreeUnreadable() (+43 more)
+### Community 0 - "Git Behavior Tests"
+Cohesion: 0.19
+Nodes (47): testing.T, TestBranchAhead(), TestBranchLocation(), TestDefaultBranch(), TestGitErrorCarriesStderr(), TestHeadBranch(), TestIsCleanTree(), TestIsCleanTreeUnreadable() (+39 more)
 
-### Community 1 - "app"
-Cohesion: 0.17
-Nodes (12): stepRun(), firstLine(), plural(), commandError(), expandCommand(), newRepoRun(), resolvePath(), TestExpandCommand() (+4 more)
-
-### Community 2 - "Design Decisions and Roadmap"
-Cohesion: 0.10
-Nodes (44): mkprs Design Decisions, The capture holds the user's workflow, not mkprs's bookkeeping, The command must leave the repo on mkprs's branch, Discovery finds only outermost, non-linked repos, Execution stays serial, A failed repo is not cleaned up at all, A failure is a repo you will have to run again for, mkprs never moves a branch to a commit it did not create (+36 more)
-
-### Community 3 - "capture"
-Cohesion: 0.08
-Nodes (24): bytes.Buffer, io.Writer, newCapture(), TestCaptureIndented(), TestCaptureStreaming(), failure(), skip(), success() (+16 more)
-
-### Community 4 - "helper_test.go"
-Cohesion: 0.16
-Nodes (10): testing.M, fileURL(), helperGit(), helperGitOK(), isolateGit(), runHelper(), TestMain(), writeLines() (+2 more)
-
-### Community 5 - "parseArgs"
-Cohesion: 0.15
-Nodes (19): github.com/spf13/pflag.FlagSet, checkFlagValues(), parseArgs(), flagForms(), TestParseArgsFlagForms(), TestParseArgsFlagFormsCoversEveryFlag(), TestParseArgsFlagOrder(), TestParseArgsHelp() (+11 more)
-
-### Community 6 - "gitArgs"
+### Community 1 - "Git Command Layer"
 Cohesion: 0.12
 Nodes (24): gitError(), TestGitRunStreams(), validateBranchName(), checkFormat(), checkoutBranch(), commit(), commitsAhead(), createBranch() (+16 more)
 
-### Community 7 - "TestDiscoverRepos"
-Cohesion: 0.39
-Nodes (7): assertEqualSlice(), dedupeRepos(), discoverRepos(), mustDiscover(), TestDedupeRepos(), TestDiscoverRepos(), TestDiscoverReposRejectsBadTargets()
+### Community 2 - "Design Decisions and Backlog"
+Cohesion: 0.10
+Nodes (37): The capture holds the user's workflow, not mkprs's bookkeeping, The command must leave the repo on mkprs's branch, dedupeRepos, Discovery finds only outermost, non-linked repos, Execution stays serial, A failed repo is not cleaned up at all, A failure is a repo you will have to run again for, mkprs never moves a branch to a commit it did not create (+29 more)
 
-### Community 8 - "End-to-End Smoke Tests"
-Cohesion: 0.62
-Nodes (6): buildBinary(), exitCodeOf(), moduleRoot(), TestBinary(), TestBinaryEndToEnd(), TestBinaryExitsTwoOnFailure()
+### Community 3 - "Output Capture and Run Pipeline"
+Cohesion: 0.11
+Nodes (14): bytes.Buffer, newCapture(), TestCaptureIndented(), TestCaptureStreaming(), TestLoggedErrorDoesNotRepeatStderr(), stepRun(), firstLine(), plural() (+6 more)
 
-### Community 10 - "pr.go"
+### Community 4 - "Outcome Model and Pipeline Steps"
+Cohesion: 0.19
+Nodes (16): failure(), skip(), success(), TestFailureReplaysOutput(), TestNameWidthAligns(), testReporter(), TestReporterTally(), TestResultLines() (+8 more)
+
+### Community 5 - "CLI Argument Parsing"
+Cohesion: 0.15
+Nodes (19): github.com/spf13/pflag.FlagSet, checkFlagValues(), parseArgs(), flagForms(), TestParseArgsFlagForms(), TestParseArgsFlagFormsCoversEveryFlag(), TestParseArgsFlagOrder(), TestParseArgsHelp() (+11 more)
+
+### Community 6 - "Test Helpers and Fixtures"
+Cohesion: 0.16
+Nodes (10): testing.M, fileURL(), helperGit(), helperGitOK(), isolateGit(), runHelper(), TestMain(), writeLines() (+2 more)
+
+### Community 7 - "Report Rendering"
+Cohesion: 0.12
+Nodes (10): io.Writer, nameWidth(), newReporter(), TestNameWidthMinimum(), TestSummary(), TestSummaryCountsReposNotProcessed(), outcomeFailed, outcomeSkipped (+2 more)
+
+### Community 8 - "PR Opening via gh"
 Cohesion: 0.17
 Nodes (12): sync.Mutex, ghArgs(), lastLine(), TestGhArgs(), TestGhCLIImplementsPROpener(), TestGhCLIReportsMissingBinary(), TestLastLine(), fakePR (+4 more)
 
+### Community 9 - "Repo Discovery"
+Cohesion: 0.39
+Nodes (7): assertEqualSlice(), dedupeRepos(), discoverRepos(), mustDiscover(), TestDedupeRepos(), TestDiscoverRepos(), TestDiscoverReposRejectsBadTargets()
+
+### Community 10 - "Binary Smoke Tests"
+Cohesion: 0.62
+Nodes (6): buildBinary(), exitCodeOf(), moduleRoot(), TestBinary(), TestBinaryEndToEnd(), TestBinaryExitsTwoOnFailure()
+
 ## Ambiguous Edges - Review These
-- `Per-repo command timeout, defaulting to 10 minutes` → `A failed repo is not cleaned up at all`  [AMBIGUOUS]
+- `The capture holds the user's workflow, not mkprs's bookkeeping` → `--tracked-only staging`  [AMBIGUOUS]
   todo.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **3 isolated node(s):** `github.com/jarrettgilliam/mkprs`, `--stop-on-failure`, `Split commitAndPush into commit and push`
+- **4 isolated node(s):** `github.com/jarrettgilliam/mkprs`, `dedupeRepos`, `Where the branch starts from, by row`, `--list to preview the repo set`
   These have ≤1 connection - possible missing edges or undocumented components.
 - **1 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **What is the exact relationship between `Per-repo command timeout, defaulting to 10 minutes` and `A failed repo is not cleaned up at all`?**
+- **What is the exact relationship between `The capture holds the user's workflow, not mkprs's bookkeeping` and `--tracked-only staging`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **Why does `repo` connect `gitArgs` to `testing.T`, `app`, `capture`?**
-  _High betweenness centrality (0.071) - this node is a cross-community bridge._
-- **Why does `TestGitRunStreams()` connect `gitArgs` to `testing.T`, `capture`?**
+- **Why does `repo` connect `Git Command Layer` to `Git Behavior Tests`, `Output Capture and Run Pipeline`, `Outcome Model and Pipeline Steps`?**
+  _High betweenness centrality (0.074) - this node is a cross-community bridge._
+- **Why does `TestGitRunStreams()` connect `Git Command Layer` to `Git Behavior Tests`, `Output Capture and Run Pipeline`?**
+  _High betweenness centrality (0.064) - this node is a cross-community bridge._
+- **Why does `capture` connect `Output Capture and Run Pipeline` to `Git Command Layer`, `Outcome Model and Pipeline Steps`, `Report Rendering`?**
   _High betweenness centrality (0.061) - this node is a cross-community bridge._
-- **Why does `capture` connect `capture` to `app`, `gitArgs`?**
-  _High betweenness centrality (0.058) - this node is a cross-community bridge._
 - **Are the 44 inferred relationships involving `newFixture()` (e.g. with `TestDiscoverRepos()` and `TestDiscoverReposRejectsBadTargets()`) actually correct?**
   _`newFixture()` has 44 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 26 inferred relationships involving `helperCmd()` (e.g. with `TestRunCommandThatCommitsItsOwnWork()` and `TestRunDeduplicatesRepos()`) actually correct?**
