@@ -11,7 +11,7 @@ type outcome interface {
 	// this package can implement outcome.
 	report(r *reporter, name string)
 	// failed reports whether this is the outcome that -s stops for and that
-	// cleanup leaves alone -- see design-notes.md, a failure is a repo you will
+	// cleanup leaves alone -- see design-decisions.md, a failure is a repo you will
 	// have to run again for. It exists so those two callers do not have to
 	// assert on the concrete type and reopen what this interface closes.
 	failed() bool

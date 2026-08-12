@@ -4,7 +4,7 @@ Each item is a heading so the list can be skimmed from GitHub's outline, and
 nothing is numbered, so items can come and go without renumbering.
 
 Decisions already settled — including the ones about what mkprs deliberately does
-*not* do — live in [`design-notes.md`](design-notes.md) and are not repeated here.
+*not* do — live in [`design-decisions.md`](design-decisions.md) and are not repeated here.
 
 ## Priorities
 
@@ -48,7 +48,7 @@ when they are added; an item with no band is one nobody has decided about yet.
 - Comments earn their place by explaining *why*, and only where a reader would
   otherwise get it wrong — name the plausible alternative and why it lost. Don't
   restate the code, the test name, the assertion below it, or what
-  [`design-notes.md`](design-notes.md) and the usage text already say. No
+  [`design-decisions.md`](design-decisions.md) and the usage text already say. No
   historical narrative: what the code used to do is git's job, not a comment's.
 - Work on a single item at a time.
 - If you have any questions that this file or source code doesn't clarify, ask.
@@ -56,7 +56,7 @@ when they are added; an item with no band is one nobody has decided about yet.
 - When finished, update this file — completed items are deleted rather than
   marked done — then stop. I'll review, commit, and push before work starts on
   the next feature.
-- Edit [`design-notes.md`](design-notes.md) only when a standing truth is
+- Edit [`design-decisions.md`](design-decisions.md) only when a standing truth is
   discovered or changes, or to fix spelling and grammar — completing a feature
   is not a reason, and the file's own header explains why. If a note looks
   wrong, say so rather than quietly rewriting it.
@@ -102,7 +102,7 @@ Notes that matter for the implementation:
 - **`n` is a skip** (`⏭️`), so the summary still adds up. It is the one skip
   mkprs does not determine for itself — the user answers "no pull request to
   create here" at the prompt — so if this lands, *a failure is a repo you will
-  have to run again for* in [`design-notes.md`](design-notes.md) needs a line
+  have to run again for* in [`design-decisions.md`](design-decisions.md) needs a line
   saying a skip can be earned that way too.
 
 #### `e` — drop into a shell in the repo
@@ -155,7 +155,7 @@ tidied gets picked up by the same re-run that adds a commit everywhere else,
 rather than needing a separate invocation.
 
 This is not the *"I did manual work, just open the PR"* mode in
-[`design-notes.md`](design-notes.md), which was dropped because manual edits do
+[`design-decisions.md`](design-decisions.md), which was dropped because manual edits do
 not scale to forty repos. This still runs the command in every repo, so it scales
 exactly as well as the primary use case.
 
@@ -190,7 +190,7 @@ and `refs/remotes/origin/<branch>` after `preflight`'s existing
 
 **Every "yes" needs no ref moved; every "no" would.** That is the whole rule, and
 it is *mkprs never moves a branch to a commit it did not create* in
-[`design-notes.md`](design-notes.md) applied one row at a time. Rows 1 and 3 are
+[`design-decisions.md`](design-decisions.md) applied one row at a time. Rows 1 and 3 are
 already sitting on the commit the work starts from, so a plain `git checkout` is
 enough and the branch only ever advances by mkprs's own commit. Rows 5 and 6
 *create* a local branch, which is not a move. Rows 2 and 4 would need
@@ -223,7 +223,7 @@ already failed for needing a ref moved, so the harder question is one the table
 never asks.
 
 **Every "no" row is a failure, not a skip**, by *a failure is a repo you will
-have to run again for* in [`design-notes.md`](design-notes.md). The work is still
+have to run again for* in [`design-decisions.md`](design-decisions.md). The work is still
 wanted in these repos; mkprs cannot reach it without moving a ref, and the user
 has to resolve that and re-run. So each names the branch and says what would
 unblock it — delete it, or push it — rather than leaving the repo quietly absent
@@ -261,7 +261,7 @@ If code is pushed or a PR is created, tell the user that and report success.
 That skip is an earned one — everything the run would have done is already on the
 server, so there is genuinely nothing to do and no reason to come back; see *a
 failure is a repo you will have to run again for* in
-[`design-notes.md`](design-notes.md).
+[`design-decisions.md`](design-decisions.md).
 
 This fills in a functionality gaps. If the user command, stage, and commit all work,
 but push or PR creations fails (Due to poor network, auth failure, etc) the user
@@ -467,7 +467,7 @@ The gaps, in the order they bite:
   is what keeps it attributable once the streams can be split — so `indented()`
   goes, and the replay reuses the same formatting the live stream already uses.
   `newCapture` takes `a.errOut` and nothing chooses a stream by flag; see *stdout is
-  the report; stderr is everything else* in [`design-notes.md`](design-notes.md).
+  the report; stderr is everything else* in [`design-decisions.md`](design-decisions.md).
 
 #### Mark the lines that only exist because of `-v`
 
