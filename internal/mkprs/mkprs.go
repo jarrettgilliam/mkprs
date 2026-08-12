@@ -21,10 +21,10 @@ const (
 // exists so that nothing below Run reaches for os.Stdout, os.Stderr, or the gh
 // binary directly.
 type app struct {
-	cfg  *config
-	out  io.Writer
-	errw io.Writer
-	prs  prOpener
+	cfg    *config
+	out    io.Writer
+	errOut io.Writer
+	prs    prOpener
 }
 
 // Run is the whole program: parse, discover, process every repo, report. It
@@ -43,29 +43,29 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
-	a := &app{cfg: cfg, out: stdout, errw: stderr, prs: ghCLI{}}
+	a := &app{cfg: cfg, out: stdout, errOut: stderr, prs: ghCLI{}}
 	return a.run()
 }
 
 func (a *app) run() int {
 	if err := a.prepare(); err != nil {
-		fmt.Fprintf(a.errw, "Error: %v\n", err)
+		fmt.Fprintf(a.errOut, "Error: %v\n", err)
 		return exitUsage
 	}
 
 	repos, err := a.collectRepos()
 	if err != nil {
-		fmt.Fprintf(a.errw, "Error: %v\n", err)
+		fmt.Fprintf(a.errOut, "Error: %v\n", err)
 		return exitUsage
 	}
 
 	if len(repos) == 0 {
-		fmt.Fprintln(a.errw, "No target repositories found.")
+		fmt.Fprintln(a.errOut, "No target repositories found.")
 		return exitOK
 	}
 
 	if err := a.checkRepoCount(len(repos)); err != nil {
-		fmt.Fprintf(a.errw, "Error: %v\n", err)
+		fmt.Fprintf(a.errOut, "Error: %v\n", err)
 		return exitUsage
 	}
 
@@ -139,18 +139,18 @@ func (a *app) processAll(repos []string) int {
 
 	for i, repoPath := range repos {
 		name := filepath.Base(repoPath)
-		c := newCapture(name, a.cfg.verbose, a.out)
+		r := newRepoRun(a, repoPath, newCapture(name, a.cfg.verbose, a.out))
 
-		res := a.processRepo(repoPath, c)
-		c.flush()
+		res := r.process()
+		r.output.flush()
 
 		// Prevent panic from calling method on nil outcome
 		if res == nil {
-			res = fail("internal error: processRepo returned no outcome", c)
+			res = r.fail("internal error: process returned no outcome")
 		}
 		res.report(rep, name)
 
-		if _, broke := res.(outcomeFailed); broke && a.cfg.stopOnFailure {
+		if res.failed() && a.cfg.stopOnFailure {
 			if left := len(repos) - i - 1; left > 0 {
 				fmt.Fprintln(a.out, "Stopped at the first failure.")
 				rep.notProcessed = left
@@ -177,10 +177,10 @@ func (a *app) reportIgnored(paths []string, one, many string) {
 		return
 	}
 
-	fmt.Fprintf(a.errw, "Ignored %d %s.\n", n, plural(n, one, many))
+	fmt.Fprintf(a.errOut, "Ignored %d %s.\n", n, plural(n, one, many))
 	if a.cfg.verbose {
 		for _, path := range paths {
-			fmt.Fprintf(a.errw, "    %s\n", path)
+			fmt.Fprintf(a.errOut, "    %s\n", path)
 		}
 	}
 }

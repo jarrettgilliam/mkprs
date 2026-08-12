@@ -65,7 +65,7 @@ func discoverRepos(targetDir string, repos []string) ([]string, error) {
 	// Only a target that found nothing pays for this; a repo root is found by
 	// the walk above, so it never reaches here.
 	if len(repos) == before {
-		if root, err := git(inside, "rev-parse", "--show-toplevel"); err == nil && root != "" {
+		if root, err := (repo{path: inside}).git("rev-parse", "--show-toplevel"); err == nil && root != "" {
 			return repos, fmt.Errorf(
 				"target is inside repository %s: %s\nmkprs runs commands at the repo root, so pass that instead",
 				root, targetDir)

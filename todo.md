@@ -90,7 +90,7 @@ Notes that matter for the implementation:
 - **stdin is already free.** `cmd.Stdin` is never set in `runCommand`, so the
   command runs against `/dev/null` and cannot swallow keystrokes meant for the
   prompt. Keep it that way.
-- **The prompt has a seam to land in.** `processRepo` calls `runCommand` and then
+- **The prompt has a seam to land in.** `process` calls `runCommand` and then
   `commitAndPush`; the pause goes between the two, with nothing to disentangle
   first.
 - **`n` is destructive.** Skipping falls through to `a.cleanup`, which checks out
@@ -237,7 +237,7 @@ step that unblocks it, which is the same shape as rows 2 and 4.
 
 #### Where the branch starts from, by row
 
-`processRepo` checks out `-b <branch> <base>` unconditionally today, and under
+`process` checks out `-b <branch> <base>` unconditionally today, and under
 `--update` that stops being one thing:
 
 - **Rows 1 and 3** — `checkout <branch>`. It exists locally and is already on the
@@ -246,7 +246,7 @@ step that unblocks it, which is the same shape as rows 2 and 4.
 - **Row 6** — create it from `origin/<default>`, exactly as today.
 
 So `prep.base` becomes row-dependent rather than always `resolveBase`'s answer,
-and this is the main structural change `--update` makes to `processRepo`.
+and this is the main structural change `--update` makes to `process`.
 
 #### On `branchAhead` functionality
 
@@ -287,7 +287,7 @@ not because `--keep-branch` was passed, so the flag only means something on rows
 
 It also forecloses a hazard `--update` would otherwise introduce. `-k` leaves the
 repo standing *on* the branch, so a later run has `startBranch == branch`;
-`restoreRepo` would then no-op the checkout and try to `git branch -D` the branch
+`repo.restore` would then no-op the checkout and try to `git branch -D` the branch
 it is standing on, which git refuses — and the refusal would go unseen, since
 `gitErrTo`'s error is discarded. That state is unreachable today only because
 `preflight` fails the repo before it gets there ("branch already exists
@@ -300,7 +300,7 @@ rule the delete is never attempted.
 the PR was created or already existed, since that along with if anything was
 pushed determine the outcome: skip or success.
 
-Along those lines, run.go's `commitAndPush` function should be split into independent
+Along those lines, `pipeline.go`'s `commitAndPush` function should be split into independent
 `commit` and `push` functions. `push` will need to return whether the push did
 anything at all (separate from err). If git reports, "Everything up-to-date"
 and the PR already exists, outcome should be skip. If push actually pushed a
@@ -353,7 +353,7 @@ The gaps, in the order they bite:
 
 - **`git`/`gitOK` bypass the capture entirely.** `cmd.Output()` sends stdout to
   a buffer and stderr into the error, so neither stream can reach the console at
-  any verbosity. That is `originURL`, `isCleanTree`, `getDefaultBranch`,
+  any verbosity. That is `originURL`, `isCleanTree`, `defaultBranch`,
   `branchLocation`, `resolveBase`, `headBranch`, `branchAhead`, and the
   `diff --cached --quiet` check in `commitAndPush` — i.e. every filter that
   decides a repo's fate. Their stdout *is* the return value, which is the
@@ -373,7 +373,7 @@ The gaps, in the order they bite:
   Consequence: **delete `gitError`** as part of this item. Its only purpose is to
   fold git's first stderr line into an error so a reason line can carry it, which
   is the thing being ruled out. No production code consumes it either —
-  `getDefaultBranch` and `branchAhead` return a `bool`, so the error dies inside
+  `defaultBranch` and `branchAhead` return a `bool`, so the error dies inside
   the helper — and once `git` buffers stderr to echo it under `-v`, stderr has
   the full text anyway. Keeping it would leave a helper whose only reader is a
   rule against reading it.
@@ -381,7 +381,7 @@ The gaps, in the order they bite:
   The failing command's stderr that the replay needs — see the next bullet — does
   not bring it back. `gitError` put the text inside `err.Error()`, so every
   consumer carried it whether or not it wanted it. What replaces it is a value
-  only the replay reads: `fail` gaining a detail argument, or `gitTo` returning
+  only the replay reads: `failure` gaining a detail argument, or `gitTo` returning
   the stderr it collected alongside the error.
 
   **`TestGitErrorCarriesStderr` goes with it.** It is the one thing that reads
@@ -400,7 +400,9 @@ The gaps, in the order they bite:
   place instead: under `-v` both streams go to stderr, and otherwise both are
   discarded. That is simpler than making four call sites conditional, and it puts
   every internal git command on the same rule as the interrogating helpers above
-  — mkprs's own output is either on screen under `-v` or nowhere.
+  — mkprs's own output is either on screen under `-v` or nowhere. `repo.log()` is
+  that one place: every git helper already routes its streams through it, so the
+  rule is written once there rather than at each call site.
 
   **The workflow's output reaches `c.buf`; bookkeeping's does not.** mkprs
   automates a manual routine — fetch, cut a branch, run the command, stage,
@@ -418,7 +420,7 @@ The gaps, in the order they bite:
   Stated this way the rule needs no list to be maintained: a step added later
   classifies itself. `--tracked-only`'s `add -u`, `--update`'s `checkout
   <branch>` and its `gh pr view` fallback are all workflow without anyone
-  deciding. `restoreRepo` is the one mutating exception — it is mkprs tidying up
+  deciding. `repo.restore` is the one mutating exception — it is mkprs tidying up
   after itself rather than anything the user asked for, so it contributes nothing
   here; see *cleanup can fail silently after a successful run*.
 
@@ -464,7 +466,7 @@ The gaps, in the order they bite:
   The replay therefore **switches from indentation to the `[repo]` prefix**, which
   is what keeps it attributable once the streams can be split — so `indented()`
   goes, and the replay reuses the same formatting the live stream already uses.
-  `newCapture` takes `a.errw` and nothing chooses a stream by flag; see *stdout is
+  `newCapture` takes `a.errOut` and nothing chooses a stream by flag; see *stdout is
   the report; stderr is everything else* in [`design-notes.md`](design-notes.md).
 
 #### Mark the lines that only exist because of `-v`
@@ -472,7 +474,7 @@ The gaps, in the order they bite:
 **Every command mkprs runs is printed to stderr, prefixed with `$`, before it
 runs** — the internal git invocations, `gh`, and the user's command alike. There
 is no category that runs silently under `-v`: if a process is started, the line
-that started it is on screen above its output. `gitCommand` is the one place
+that started it is on screen above its output. `repo.gitCommand` is the one place
 every git invocation is built, so that is where the printing belongs rather than
 at each call site.
 
@@ -507,7 +509,7 @@ trace(format string, args ...any)` that no-ops unless `c.verbose` puts the
 condition in one place instead of at every call site.
 
 `capture` currently streams to `a.out`; it takes the writer as a constructor
-argument, so this is `newCapture(name, a.cfg.verbose, a.errw)` and nothing
+argument, so this is `newCapture(name, a.cfg.verbose, a.errOut)` and nothing
 further. Worth renaming the field off `out` at the same time, since it stops
 being the same stream the reporter writes to — and `outcomeFailed` no longer
 writes to `r.out` at all, so the replay is the capture's own business rather
@@ -548,8 +550,12 @@ redaction constraint on the side of the seam that can actually honor it. The
 alternative — `openPR` calling `ghArgs` itself to trace before delegating — leaks
 gh's argv into the caller that exists to not know about gh.
 
+`repo` now carries the path and the capture together, so this can be
+`open(r repo, pr pullRequest) (string, error)` and drop the separate `repoPath`
+argument at the same time.
+
 Most of the filters listed above now live in `preflight`, which is a contiguous
-block rather than six statements scattered through `processRepo` — so the trace
+block rather than six statements scattered through `process` — so the trace
 lines land in one place.
 
 ### `--tracked-only` staging
@@ -568,7 +574,7 @@ files), but a command that drops build artifacts in a repo with a thin
 **High, after --verbose** — a repo left somewhere the user did not put it, under a `✅` that says
 everything went fine.
 
-`restoreRepo` discards both of its errors for `git checkout` and `git branch -D`
+`repo.restore` discards both of its errors for `git checkout` and `git branch -D`
 and reports success with no indication that something went wrong.
 
 **It stays `outcomeSuccess`.** Everything the user asked for happened — the
@@ -594,7 +600,7 @@ means it stalls every repo behind it. Run under `exec.CommandContext` with
 `context.WithTimeout`; expiry is a normal per-repo failure (`command timed out
 after 10m`), so the run continues and cleanup still fires through the existing
 `defer a.cleanup`. `runCommand` is the whole surface this touches: it already
-returns the error `processRepo` turns into that failure. `--timeout <duration>`
+returns the error `process` turns into that failure. `--timeout <duration>`
 overrides, `--timeout 0` disables. 10 minutes is chosen to sit well clear of a
 slow-but-real `npm ci` or `dotnet restore` while still catching a wedged process
 the same afternoon; tune it once there is evidence, but do not ship it unset.
@@ -717,49 +723,3 @@ requirement, which is the point of this whole item.
 
 **The seam stays.** `prOpener` earns its place from `fakePR` in the end-to-end
 tests, not from having two production implementations.
-
-## Polish
-
-### Spell out names that outlive their line
-
-**Low** — readability only, and cheapest done after the items that are about to
-rewrite these same signatures.
-
-Single letters are fine for a local whose declaration is visible from its use.
-They are not fine for struct fields, package-level declarations, or parameters,
-where the reader meets the name far from anything that explains it. A good name
-deletes the comment that would have explained it.
-
-Receivers stay short (`a`, `c`, `o`, `r`) — that is Go convention, not laziness,
-and `func (c *capture)` reads fine because the type is right there.
-`Write(p []byte)` keeps its parameter name to match `io.Writer`.
-
-The actual offenders, all `internal/mkprs`:
-
-| where | now | suggested |
-|---|---|---|
-| `outcome.go` field | `outcomeFailed.c` | `output` |
-| `mkprs.go` field | `app.errw` | `errOut` |
-| `git.go` params | `gitTo(…, w io.Writer)`, `gitErrTo(…, w)`, `restoreRepo(…, w)` | `log` |
-| `git.go` param | `resolveBase(repoPath, dflt)` | `defaultBranch` |
-| `run.go` params | `c *capture`, in all six of `processRepo`, `openPR`, `preflight`, `cleanup`, `runCommand`, `commitAndPush` | `output` |
-| `cli.go` param | `printUsage(w io.Writer, fs *pflag.FlagSet)` | `out`, `flags` |
-
-`outcomeFailed.c` is the one that proves the point: it carries a three-line
-comment whose first job is saying what the field *is*. Named `output`, only the
-non-obvious half needs to survive — that it is still being written to when the
-outcome is built, because the deferred `restoreRepo` runs before the caller
-reports.
-
-`config`'s fields, the `usage*` constants and the `exit*` constants are already
-fine; this is not a sweep of everything short.
-
-### A `repo` type for the git helpers
-
-**Low** — parked by its own last sentence: high work, and only worth it if
-`git.go` grows again.
-
-Every git helper takes `repoPath` first, which is a method receiver wearing a
-disguise. A `repo` type with `r.git(…)` would delete that parameter from fifteen
-signatures in `git.go` alone. Attractive, and much larger than it looks — worth
-doing only if the file grows again.

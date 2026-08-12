@@ -315,6 +315,21 @@ func newFixture(t *testing.T) *fixture {
 	return f
 }
 
+// stepRun builds a repoRun for the tests that drive a single pipeline step
+// rather than a whole run. A nil output means the test does not read it.
+func stepRun(a *app, repoPath string, output *capture) *repoRun {
+	if output == nil {
+		output = newCapture("x", false, io.Discard)
+	}
+	return newRepoRun(a, repoPath, output)
+}
+
+// at wraps a fixture path so the git methods can be called on it. The fixtures
+// deal in paths, because most of what they hand back is joined onto or passed
+// to gitCmd rather than interrogated. Output is discarded: the few tests that
+// read it build their own capture.
+func at(path string) repo { return repo{path: path} }
+
 // repo creates a repo whose origin looks like GitHub but resolves to a local
 // bare repo, so fetch and push genuinely work offline.
 func (f *fixture) repo(name string) string {
@@ -525,7 +540,7 @@ func run(t *testing.T, prs prOpener, args []string, command ...string) result {
 	}
 
 	var stdout, stderr bytes.Buffer
-	a := &app{cfg: cfg, out: &stdout, errw: &stderr, prs: prs}
+	a := &app{cfg: cfg, out: &stdout, errOut: &stderr, prs: prs}
 	code := a.run()
 	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}
 }

@@ -1,7 +1,7 @@
 package mkprs
 
 import (
-	"bytes"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,7 +19,7 @@ func TestGitHelperStreams(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		out, err := git(f.repo("x"), "rev-parse", "--abbrev-ref", "HEAD")
+		out, err := at(f.repo("x")).git("rev-parse", "--abbrev-ref", "HEAD")
 		if err != nil || out != "main" {
 			t.Errorf("git = %q, %v; want main, nil", out, err)
 		}
@@ -30,8 +30,9 @@ func TestGitHelperStreams(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		var out bytes.Buffer
-		if err := gitTo(f.repo("x"), &out, bad...); err == nil {
+		out := newCapture("x", false, io.Discard)
+		r := repo{path: f.repo("x"), output: out}
+		if err := r.gitTo(bad...); err == nil {
 			t.Fatal("gitTo err = nil, want a failure")
 		}
 		if !strings.Contains(out.String(), "fatal:") {
@@ -44,19 +45,20 @@ func TestGitHelperStreams(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		repo := f.repo("x")
-		gitCmd(t, repo, "branch", "work")
+		dir := f.repo("x")
+		gitCmd(t, dir, "branch", "work")
 
-		var out bytes.Buffer
-		if err := gitErrTo(repo, &out, "branch", "-D", "work"); err != nil {
+		out := newCapture("x", false, io.Discard)
+		r := repo{path: dir, output: out}
+		if err := r.gitErrTo("branch", "-D", "work"); err != nil {
 			t.Fatalf("gitErrTo err = %v, want nil", err)
 		}
-		if out.Len() != 0 {
+		if !out.empty() {
 			t.Errorf("output = %q, want stdout discarded", out.String())
 		}
 
 		// Same command again, now that the branch is gone.
-		if err := gitErrTo(repo, &out, "branch", "-D", "work"); err == nil {
+		if err := r.gitErrTo("branch", "-D", "work"); err == nil {
 			t.Fatal("gitErrTo err = nil, want a failure")
 		}
 		if !strings.Contains(out.String(), "not found") {
@@ -71,7 +73,7 @@ func TestGitErrorCarriesStderr(t *testing.T) {
 	t.Parallel()
 
 	f := newFixture(t)
-	_, err := git(f.repo("x"), "rev-parse", "--verify", "refs/heads/nope")
+	_, err := at(f.repo("x")).git("rev-parse", "--verify", "refs/heads/nope")
 	if err == nil {
 		t.Fatal("git err = nil, want a failure")
 	}
@@ -100,9 +102,9 @@ func TestIsGitHubRepo(t *testing.T) {
 			t.Parallel()
 
 			f := newFixture(t)
-			repo := f.repoWithRemote("x", tt.remote)
+			dir := f.repoWithRemote("x", tt.remote)
 
-			ok, msg := isGitHubRepo(repo)
+			ok, msg := at(dir).isGitHubRepo()
 			if ok != tt.wantOK {
 				t.Errorf("isGitHubRepo = %v, want %v (%s)", ok, tt.wantOK, msg)
 			}
@@ -117,14 +119,14 @@ func TestIsCleanTree(t *testing.T) {
 	t.Parallel()
 
 	f := newFixture(t)
-	repo := f.repo("x")
+	dir := f.repo("x")
 
-	if clean, ok := isCleanTree(repo); !ok || !clean {
+	if clean, ok := at(dir).isCleanTree(); !ok || !clean {
 		t.Fatalf("isCleanTree = %v, %v; want a freshly committed repo to be clean", clean, ok)
 	}
 
-	writeFile(t, filepath.Join(repo, "file.txt"), "changed\n")
-	if clean, ok := isCleanTree(repo); !ok || clean {
+	writeFile(t, filepath.Join(dir, "file.txt"), "changed\n")
+	if clean, ok := at(dir).isCleanTree(); !ok || clean {
 		t.Errorf("isCleanTree = %v, %v; want a modified repo to be dirty", clean, ok)
 	}
 }
@@ -139,7 +141,7 @@ func TestIsCleanTreeUnreadable(t *testing.T) {
 	notARepo := filepath.Join(f.root, "notes")
 	mkdir(t, notARepo)
 
-	if clean, ok := isCleanTree(notARepo); ok {
+	if clean, ok := at(notARepo).isCleanTree(); ok {
 		t.Errorf("isCleanTree = %v, %v; want the status to be unanswerable", clean, ok)
 	}
 }
@@ -150,10 +152,10 @@ func TestIsCleanTreeUntracked(t *testing.T) {
 	t.Parallel()
 
 	f := newFixture(t)
-	repo := f.repo("x")
-	writeFile(t, filepath.Join(repo, "stray.txt"), "x\n")
+	dir := f.repo("x")
+	writeFile(t, filepath.Join(dir, "stray.txt"), "x\n")
 
-	if clean, ok := isCleanTree(repo); !ok || clean {
+	if clean, ok := at(dir).isCleanTree(); !ok || clean {
 		t.Errorf("isCleanTree = %v, %v; want an untracked file to make the tree dirty", clean, ok)
 	}
 }
@@ -165,7 +167,7 @@ func TestBranchLocation(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		if got := branchLocation(f.repo("x"), "nope"); got != "" {
+		if got := at(f.repo("x")).branchLocation("nope"); got != "" {
 			t.Errorf("branchLocation = %q, want empty", got)
 		}
 	})
@@ -174,10 +176,10 @@ func TestBranchLocation(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		repo := f.repo("x")
-		gitCmd(t, repo, "branch", "here")
+		dir := f.repo("x")
+		gitCmd(t, dir, "branch", "here")
 
-		if got := branchLocation(repo, "here"); got != "locally" {
+		if got := at(dir).branchLocation("here"); got != "locally" {
 			t.Errorf("branchLocation = %q, want %q", got, "locally")
 		}
 	})
@@ -186,11 +188,11 @@ func TestBranchLocation(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		repo := f.repo("x")
-		gitCmd(t, repo, "push", "-q", "origin", "HEAD:refs/heads/upstream-only")
-		gitCmd(t, repo, "fetch", "-q", "origin")
+		dir := f.repo("x")
+		gitCmd(t, dir, "push", "-q", "origin", "HEAD:refs/heads/upstream-only")
+		gitCmd(t, dir, "fetch", "-q", "origin")
 
-		if got := branchLocation(repo, "upstream-only"); got != "on origin" {
+		if got := at(dir).branchLocation("upstream-only"); got != "on origin" {
 			t.Errorf("branchLocation = %q, want %q", got, "on origin")
 		}
 	})
@@ -199,12 +201,12 @@ func TestBranchLocation(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		repo := f.repo("x")
-		gitCmd(t, repo, "push", "-q", "origin", "HEAD:refs/heads/both")
-		gitCmd(t, repo, "fetch", "-q", "origin")
-		gitCmd(t, repo, "branch", "both")
+		dir := f.repo("x")
+		gitCmd(t, dir, "push", "-q", "origin", "HEAD:refs/heads/both")
+		gitCmd(t, dir, "fetch", "-q", "origin")
+		gitCmd(t, dir, "branch", "both")
 
-		if got := branchLocation(repo, "both"); got != "locally" {
+		if got := at(dir).branchLocation("both"); got != "locally" {
 			t.Errorf("branchLocation = %q, want %q", got, "locally")
 		}
 	})
@@ -217,7 +219,7 @@ func TestDefaultBranch(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		got, ok := getDefaultBranch(f.repo("x"))
+		got, ok := at(f.repo("x")).defaultBranch()
 		if !ok || got != "main" {
 			t.Errorf("defaultBranch = %q, %v; want main, true", got, ok)
 		}
@@ -227,18 +229,18 @@ func TestDefaultBranch(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		repo := f.repo("dev-default")
+		dir := f.repo("dev-default")
 		// Re-point both the repo and its remote at develop.
-		gitCmd(t, repo, "branch", "develop")
-		gitCmd(t, repo, "push", "-q", "origin", "develop")
+		gitCmd(t, dir, "branch", "develop")
+		gitCmd(t, dir, "push", "-q", "origin", "develop")
 		gitCmd(t, f.bare("dev-default"), "symbolic-ref", "HEAD", "refs/heads/develop")
-		gitCmd(t, repo, "push", "-q", "origin", "--delete", "main")
-		gitCmd(t, repo, "checkout", "-q", "develop")
-		gitCmd(t, repo, "branch", "-q", "-D", "main")
-		gitCmd(t, repo, "remote", "set-head", "origin", "develop")
-		gitCmd(t, repo, "fetch", "-q", "origin", "--prune")
+		gitCmd(t, dir, "push", "-q", "origin", "--delete", "main")
+		gitCmd(t, dir, "checkout", "-q", "develop")
+		gitCmd(t, dir, "branch", "-q", "-D", "main")
+		gitCmd(t, dir, "remote", "set-head", "origin", "develop")
+		gitCmd(t, dir, "fetch", "-q", "origin", "--prune")
 
-		got, ok := getDefaultBranch(repo)
+		got, ok := at(dir).defaultBranch()
 		if !ok || got != "develop" {
 			t.Errorf("defaultBranch = %q, %v; want develop, true", got, ok)
 		}
@@ -248,7 +250,7 @@ func TestDefaultBranch(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		if got, ok := getDefaultBranch(f.plainRepo("x")); ok {
+		if got, ok := at(f.plainRepo("x")).defaultBranch(); ok {
 			t.Errorf("defaultBranch = %q, %v; want \"\", false", got, ok)
 		}
 	})
@@ -262,7 +264,7 @@ func TestResolveBase(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		if got := resolveBase(f.repo("x"), "main"); got != "origin/main" {
+		if got := at(f.repo("x")).resolveBase("main"); got != "origin/main" {
 			t.Errorf("resolveBase = %q, want origin/main", got)
 		}
 	})
@@ -271,7 +273,7 @@ func TestResolveBase(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		if got := resolveBase(f.plainRepo("x"), "main"); got != "main" {
+		if got := at(f.plainRepo("x")).resolveBase("main"); got != "main" {
 			t.Errorf("resolveBase = %q, want main", got)
 		}
 	})
@@ -284,7 +286,7 @@ func TestHeadBranch(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		name, ok := headBranch(f.repo("x"))
+		name, ok := at(f.repo("x")).headBranch()
 		if !ok || name != "main" {
 			t.Errorf("headBranch = %q, %v, want main, true", name, ok)
 		}
@@ -295,10 +297,10 @@ func TestHeadBranch(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		repo := f.repo("x")
-		gitCmd(t, repo, "checkout", "-q", "--detach")
+		dir := f.repo("x")
+		gitCmd(t, dir, "checkout", "-q", "--detach")
 
-		if name, ok := headBranch(repo); ok {
+		if name, ok := at(dir).headBranch(); ok {
 			t.Errorf("headBranch = %q, true; want ok false when detached", name)
 		}
 	})
@@ -313,12 +315,12 @@ func TestBranchAhead(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		repo := f.repo("x")
-		gitCmd(t, repo, "checkout", "-q", "-b", "work")
-		writeFile(t, filepath.Join(repo, "file.txt"), "changed\n")
-		gitCmd(t, repo, "commit", "-q", "-a", "-m", "work")
+		dir := f.repo("x")
+		gitCmd(t, dir, "checkout", "-q", "-b", "work")
+		writeFile(t, filepath.Join(dir, "file.txt"), "changed\n")
+		gitCmd(t, dir, "commit", "-q", "-a", "-m", "work")
 
-		ahead, ok := branchAhead(repo, "main", "work")
+		ahead, ok := at(dir).branchAhead("main", "work")
 		if !ok {
 			t.Fatal("branchAhead could not answer")
 		}
@@ -331,10 +333,10 @@ func TestBranchAhead(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		repo := f.repo("x")
-		gitCmd(t, repo, "checkout", "-q", "-b", "work")
+		dir := f.repo("x")
+		gitCmd(t, dir, "checkout", "-q", "-b", "work")
 
-		ahead, ok := branchAhead(repo, "main", "work")
+		ahead, ok := at(dir).branchAhead("main", "work")
 		if !ok {
 			t.Fatal("branchAhead could not answer")
 		}
@@ -349,7 +351,7 @@ func TestBranchAhead(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		if _, ok := branchAhead(f.repo("x"), "main", "no-such-branch"); ok {
+		if _, ok := at(f.repo("x")).branchAhead("main", "no-such-branch"); ok {
 			t.Error("ok = true, want false for a ref that does not exist")
 		}
 	})
@@ -359,15 +361,15 @@ func TestRestoreRepo(t *testing.T) {
 	t.Parallel()
 
 	f := newFixture(t)
-	repo := f.repo("x")
-	gitCmd(t, repo, "checkout", "-q", "-b", "work")
+	dir := f.repo("x")
+	gitCmd(t, dir, "checkout", "-q", "-b", "work")
 
-	restoreRepo(repo, "main", "work", &bytes.Buffer{})
+	at(dir).restore("main", "work")
 
-	if got := currentBranch(t, repo); got != "main" {
+	if got := currentBranch(t, dir); got != "main" {
 		t.Errorf("current branch = %q, want main", got)
 	}
-	if localHasBranch(t, repo, "work") {
+	if localHasBranch(t, dir, "work") {
 		t.Error("the work branch should have been deleted")
 	}
 }

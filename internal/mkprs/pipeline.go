@@ -8,17 +8,34 @@ import (
 	"path/filepath"
 )
 
-func (a *app) openPR(repoPath, base string, c *capture) outcome {
-	url, err := a.prs.open(repoPath, pullRequest{
+// repoRun is one repository's turn through the pipeline.
+//
+// repo is embedded, so the git helpers and the capture read directly. app is
+// not: embedding it would promote run, processAll and collectRepos onto a
+// per-repo value, where they are nonsense.
+type repoRun struct {
+	a *app
+	repo
+}
+
+func newRepoRun(a *app, repoPath string, output *capture) *repoRun {
+	return &repoRun{a: a, repo: repo{path: repoPath, output: output}}
+}
+
+// fail ends this repo, replaying its output under the reason.
+func (r *repoRun) fail(reason string) outcome { return failure(reason, r.output) }
+
+func (r *repoRun) openPR(base string) outcome {
+	url, err := r.a.prs.open(r.path, pullRequest{
 		Base:      base,
-		Head:      a.cfg.branch,
-		Title:     a.cfg.title,
-		Body:      a.cfg.body,
-		Reviewers: a.cfg.reviewers,
-		Draft:     a.cfg.draft,
-	}, c)
+		Head:      r.a.cfg.branch,
+		Title:     r.a.cfg.title,
+		Body:      r.a.cfg.body,
+		Reviewers: r.a.cfg.reviewers,
+		Draft:     r.a.cfg.draft,
+	}, r.output)
 	if err != nil {
-		return fail(err.Error(), c)
+		return r.fail(err.Error())
 	}
 	return success(url)
 }
@@ -36,50 +53,52 @@ type prep struct {
 }
 
 // preflight runs every check that can end a repo before its command does, and
-// reads the names the rest of processRepo needs. A non-nil outcome means stop;
+// reads the names the rest of process needs. A non-nil outcome means stop;
 // prep is meaningless in that case.
-func preflight(repoPath, branch string, c *capture) (prep, outcome) {
-	if ok, note := isGitHubRepo(repoPath); !ok {
+func (r *repoRun) preflight() (prep, outcome) {
+	branch := r.a.cfg.branch
+
+	if ok, note := r.isGitHubRepo(); !ok {
 		return prep{}, skip(note)
 	}
 
-	clean, ok := isCleanTree(repoPath)
+	clean, ok := r.isCleanTree()
 	if !ok {
-		return prep{}, fail("could not read the working tree status", c)
+		return prep{}, r.fail("could not read the working tree status")
 	}
 	if !clean {
-		return prep{}, fail("working tree not clean", c)
+		return prep{}, r.fail("working tree not clean")
 	}
 
 	// Fetch before any decision that reads a ref. --prune clears
 	// refs/remotes/origin/<branch> after a PR is merged and its branch deleted
 	// upstream; checking first would skip the repo on a ref that is only stale.
-	if err := gitTo(repoPath, c, "fetch", "origin", "--quiet", "--prune"); err != nil {
-		return prep{}, fail("could not fetch origin", c)
+	if err := r.gitTo("fetch", "origin", "--quiet", "--prune"); err != nil {
+		return prep{}, r.fail("could not fetch origin")
 	}
 
-	defaultBranch, ok := getDefaultBranch(repoPath)
+	defaultBranch, ok := r.defaultBranch()
 	if !ok {
-		return prep{}, fail("no default branch on origin; set it with 'git remote set-head origin -a'", c)
+		return prep{}, r.fail("no default branch on origin; set it with 'git remote set-head origin -a'")
 	}
 
-	startBranch, ok := headBranch(repoPath)
+	startBranch, ok := r.headBranch()
 	if !ok {
-		return prep{}, fail("not on a branch (detached HEAD)", c)
+		return prep{}, r.fail("not on a branch (detached HEAD)")
 	}
 
 	// A name is all mkprs has here: the branch may be a previous run's PR, a
 	// colleague's, or a different command's, and nothing local tells them
 	// apart. So this is a guess that the work is still wanted, not a
 	// determination that it is not -- which is what --update is meant to settle.
-	if where := branchLocation(repoPath, branch); where != "" {
-		return prep{}, fail(fmt.Sprintf("branch '%s' already exists %s", branch, where), c)
+	if where := r.branchLocation(branch); where != "" {
+		return prep{}, r.fail(fmt.Sprintf("branch '%s' already exists %s", branch, where))
 	}
 
 	return prep{
 		defaultBranch: defaultBranch,
 		startBranch:   startBranch,
-		base:          resolveBase(repoPath, defaultBranch),
+		base:          r.resolveBase(defaultBranch),
 	}, nil
 }
 
@@ -99,15 +118,18 @@ func expandCommand(command []string, abs string) []string {
 
 // cleanup returns the repo to startBranch and deletes the working branch.
 // Both opt-outs mean "leave the repo alone" rather than "delete the branch but
-// stay put" -- see restoreRepo for why that is all or nothing.
-func (a *app) cleanup(res outcome, repoPath, startBranch string, c *capture) {
-	if a.cfg.keepBranch {
+// stay put" -- see repo.restore for why that is all or nothing.
+func (r *repoRun) cleanup(res outcome, startBranch string) {
+	if r.a.cfg.keepBranch {
 		return
 	}
-	if _, broke := res.(outcomeFailed); broke {
+	// The nil check is not redundant: every path that reaches the deferred
+	// cleanup assigns a result, but a future one that does not would panic
+	// inside a defer rather than skip a cleanup.
+	if res != nil && res.failed() {
 		return
 	}
-	restoreRepo(repoPath, startBranch, a.cfg.branch, c)
+	r.restore(startBranch, r.a.cfg.branch)
 }
 
 // runCommand runs the user's command in the repo, with both streams going to
@@ -115,15 +137,15 @@ func (a *app) cleanup(res outcome, repoPath, startBranch string, c *capture) {
 //
 // stdin is deliberately left unset -- the command runs against /dev/null, so it
 // cannot consume input meant for mkprs itself.
-func (a *app) runCommand(repoPath string, c *capture) error {
-	abs := resolvePath(repoPath)
-	expanded := expandCommand(a.cfg.command, abs)
+func (r *repoRun) runCommand() error {
+	abs := resolvePath(r.path)
+	expanded := expandCommand(r.a.cfg.command, abs)
 
 	cmd := exec.Command(expanded[0], expanded[1:]...)
-	cmd.Dir = repoPath
-	cmd.Env = append(os.Environ(), "REPO="+abs, "REPO_NAME="+filepath.Base(repoPath))
-	cmd.Stdout = c
-	cmd.Stderr = c
+	cmd.Dir = r.path
+	cmd.Env = append(os.Environ(), "REPO="+abs, "REPO_NAME="+filepath.Base(r.path))
+	cmd.Stdout = r.output
+	cmd.Stderr = r.output
 
 	if err := cmd.Run(); err != nil {
 		return commandError(err)
@@ -135,26 +157,26 @@ func (a *app) runCommand(repoPath string, c *capture) error {
 // ready for a pull request. A nil outcome means it did; anything else ends the
 // repo here. It returns an outcome rather than an error because "the command
 // changed nothing" is a skip, not a failure.
-func (a *app) commitAndPush(repoPath string, p prep, c *capture) outcome {
-	branch := a.cfg.branch
+func (r *repoRun) commitAndPush(p prep) outcome {
+	branch := r.a.cfg.branch
 
-	work, ok := headBranch(repoPath)
+	work, ok := r.headBranch()
 	if !ok {
-		return fail("command left the repo with a detached HEAD", c)
+		return r.fail("command left the repo with a detached HEAD")
 	}
 	if work != branch {
-		return fail(fmt.Sprintf("command left the repo on '%s', not '%s'", work, branch), c)
+		return r.fail(fmt.Sprintf("command left the repo on '%s', not '%s'", work, branch))
 	}
 
-	if err := gitTo(repoPath, c, "add", "-A"); err != nil {
-		return fail("could not stage changes", c)
+	if err := r.gitTo("add", "-A"); err != nil {
+		return r.fail("could not stage changes")
 	}
 
 	// --quiet exits 0 when there is nothing staged. Nothing staged is not the
 	// same as nothing done: the command may have committed its own work.
-	if !gitOK(repoPath, "diff", "--cached", "--quiet") {
-		if err := gitTo(repoPath, c, "commit", "-q", "-m", a.cfg.message); err != nil {
-			return fail("could not commit", c)
+	if !r.gitOK("diff", "--cached", "--quiet") {
+		if err := r.gitTo("commit", "-q", "-m", r.a.cfg.message); err != nil {
+			return r.fail("could not commit")
 		}
 	}
 
@@ -162,47 +184,47 @@ func (a *app) commitAndPush(repoPath string, p prep, c *capture) outcome {
 	// being read as a no-op and then deleted by the deferred cleanup. A command
 	// that commits and then reverts opens an empty PR, which is visible and
 	// harmless; a silently deleted commit is neither.
-	ahead, ok := branchAhead(repoPath, p.base, branch)
+	ahead, ok := r.branchAhead(p.base, branch)
 	if !ok {
-		return fail(fmt.Sprintf("could not compare '%s' to %s", branch, p.base), c)
+		return r.fail(fmt.Sprintf("could not compare '%s' to %s", branch, p.base))
 	}
 	if !ahead {
 		return skip("command made no changes")
 	}
 
-	if err := gitTo(repoPath, c, "push", "-u", "origin", branch, "--quiet"); err != nil {
-		return fail(fmt.Sprintf("unable to push to origin/%s", branch), c)
+	if err := r.gitTo("push", "-u", "origin", branch, "--quiet"); err != nil {
+		return r.fail(fmt.Sprintf("unable to push to origin/%s", branch))
 	}
 
 	return nil
 }
 
-// processRepo runs one repo to a conclusion: the pre-flight filters, the
-// user's command, the commit and push, then the pull request. The result is
-// named because the deferred cleanup has to see it.
-func (a *app) processRepo(repoPath string, c *capture) (res outcome) {
-	p, res := preflight(repoPath, a.cfg.branch, c)
+// process runs one repo to a conclusion: the pre-flight filters, the user's
+// command, the commit and push, then the pull request. The result is named
+// because the deferred cleanup has to see it.
+func (r *repoRun) process() (res outcome) {
+	p, res := r.preflight()
 	if res != nil {
 		return res
 	}
 
-	if err := gitTo(repoPath, c, "checkout", "-b", a.cfg.branch, p.base, "--quiet"); err != nil {
-		return fail("could not create branch", c)
+	if err := r.gitTo("checkout", "-b", r.a.cfg.branch, p.base, "--quiet"); err != nil {
+		return r.fail("could not create branch")
 	}
 	// The branch exists from here on, so the repo needs restoring however we leave.
-	defer func() { a.cleanup(res, repoPath, p.startBranch, c) }()
+	defer func() { r.cleanup(res, p.startBranch) }()
 
-	if err := a.runCommand(repoPath, c); err != nil {
-		return fail(err.Error(), c)
+	if err := r.runCommand(); err != nil {
+		return r.fail(err.Error())
 	}
 
 	// Assigned through the named result, not a shadowing one: the deferred
 	// cleanup reads res.
-	if res = a.commitAndPush(repoPath, p, c); res != nil {
+	if res = r.commitAndPush(p); res != nil {
 		return res
 	}
 
-	return a.openPR(repoPath, p.defaultBranch, c)
+	return r.openPR(p.defaultBranch)
 }
 
 // resolvePath mirrors realpath: absolute, with symlinks resolved. This matters

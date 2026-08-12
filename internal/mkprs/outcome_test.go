@@ -38,7 +38,7 @@ func TestResultLines(t *testing.T) {
 		{
 			name: "failure states the reason",
 			report: func(w *bytes.Buffer) {
-				fail("command exited 1", newCapture("acme-web", false, w)).report(testReporter(w), "acme-web")
+				failure("command exited 1", newCapture("acme-web", false, w)).report(testReporter(w), "acme-web")
 			},
 			want: "❌ acme-web command exited 1\n",
 		},
@@ -46,7 +46,7 @@ func TestResultLines(t *testing.T) {
 			name: "failure pads to the column width",
 			report: func(w *bytes.Buffer) {
 				r := &reporter{out: w, width: 8}
-				fail("could not commit", newCapture("web", false, w)).report(r, "web")
+				failure("could not commit", newCapture("web", false, w)).report(r, "web")
 			},
 			want: "❌ web      could not commit\n",
 		},
@@ -78,7 +78,7 @@ func TestFailureReplaysOutput(t *testing.T) {
 		_, _ = c.Write([]byte("line one\nline two\n"))
 
 		var buf bytes.Buffer
-		fail("boom", c).report(&reporter{out: &buf, width: 3}, "web")
+		failure("boom", c).report(&reporter{out: &buf, width: 3}, "web")
 
 		want := "❌ web boom\n    line one\n    line two\n"
 		if got := buf.String(); got != want {
@@ -94,7 +94,7 @@ func TestFailureReplaysOutput(t *testing.T) {
 		_, _ = c.Write([]byte("line one\n"))
 
 		var buf bytes.Buffer
-		fail("boom", c).report(&reporter{out: &buf, width: 3}, "web")
+		failure("boom", c).report(&reporter{out: &buf, width: 3}, "web")
 
 		if got := buf.String(); got != "❌ web boom\n" {
 			t.Errorf("got %q, want the reason only", got)
@@ -112,8 +112,8 @@ func TestReporterTally(t *testing.T) {
 
 	success("https://x/1").report(r, "a")
 	skip("command made no changes").report(r, "b")
-	fail("boom", newCapture("c", false, &buf)).report(r, "c")
-	fail("boom", newCapture("d", false, &buf)).report(r, "d")
+	failure("boom", newCapture("c", false, &buf)).report(r, "c")
+	failure("boom", newCapture("d", false, &buf)).report(r, "d")
 
 	buf.Reset()
 	r.summary()
