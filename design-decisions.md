@@ -1,4 +1,4 @@
-# mkprs — design notes
+# mkprs — design decisions
 
 The non-obvious rules the code keeps. Mostly what mkprs deliberately does *not*
 do, so a settled question is not reopened.

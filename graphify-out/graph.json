@@ -2728,7 +2728,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "propener seam",
       "_origin": "semantic",
       "id": "design_notes_propener_seam"
@@ -2743,7 +2743,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "--stop-on-failure",
       "_origin": "semantic",
       "id": "design_notes_stop_on_failure"
@@ -2758,7 +2758,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "success, skipped, failed \u2014 the three outcomes",
       "_origin": "semantic",
       "id": "design_notes_three_outcomes"
@@ -2773,7 +2773,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "github rest api notes (pulls endpoint, 422, rate limits)",
       "_origin": "semantic",
       "id": "todo_api_notes"
@@ -2788,7 +2788,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "where the branch starts from, by row",
       "_origin": "semantic",
       "id": "todo_branch_start_by_row"
@@ -2803,7 +2803,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "branchahead rework \u2014 success only when something was pushed or created",
       "_origin": "semantic",
       "id": "todo_branchahead_rework"
@@ -2818,7 +2818,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "cleanup can fail silently after a successful run",
       "_origin": "semantic",
       "id": "todo_cleanup_fails_silently"
@@ -2833,7 +2833,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "cleanup restores the branches the repo had",
       "_origin": "semantic",
       "id": "todo_cleanup_restores_branches"
@@ -2848,7 +2848,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "per-repo command timeout, defaulting to 10 minutes",
       "_origin": "semantic",
       "id": "todo_command_timeout"
@@ -2863,7 +2863,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "delete giterror (and testgiterrorcarriesstderr)",
       "_origin": "semantic",
       "id": "todo_delete_giterror"
@@ -2878,7 +2878,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "migration \u2014 replace ghcli outright with restapi",
       "_origin": "semantic",
       "id": "todo_gh_migration"
@@ -2893,7 +2893,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "-i/--interactive review gate",
       "_origin": "semantic",
       "id": "todo_interactive_review_gate"
@@ -2908,7 +2908,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "e \u2014 drop into a shell in the repo",
       "_origin": "semantic",
       "id": "todo_interactive_shell_detour"
@@ -2923,7 +2923,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "--list to preview the repo set",
       "_origin": "semantic",
       "id": "todo_list_flag"
@@ -2938,7 +2938,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "make --verbose actually verbose",
       "_origin": "semantic",
       "id": "todo_make_verbose_verbose"
@@ -2953,7 +2953,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "opening versus updating the pull request",
       "_origin": "semantic",
       "id": "todo_opening_versus_updating_pr"
@@ -2968,7 +2968,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "priority bands (high/medium/low)",
       "_origin": "semantic",
       "id": "todo_priority_bands"
@@ -2983,7 +2983,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "propener.open takes the capture rather than an io.writer",
       "_origin": "semantic",
       "id": "todo_propener_takes_capture"
@@ -2998,7 +2998,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "refuse the default branch as the working branch",
       "_origin": "semantic",
       "id": "todo_refuse_default_branch"
@@ -3013,7 +3013,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "replace gh with direct github api calls",
       "_origin": "semantic",
       "id": "todo_replace_gh_with_api"
@@ -3028,7 +3028,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "split commitandpush into commit and push",
       "_origin": "semantic",
       "id": "todo_split_commit_and_push"
@@ -3043,7 +3043,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "token discovery order (gh_token, gh auth token, git credential fill)",
       "_origin": "semantic",
       "id": "todo_token_discovery"
@@ -3058,7 +3058,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "mark the lines that only exist because of -v ($ trace lines)",
       "_origin": "semantic",
       "id": "todo_trace_lines"
@@ -3073,7 +3073,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "--tracked-only staging",
       "_origin": "semantic",
       "id": "todo_tracked_only"
@@ -3088,7 +3088,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "--update to add to an existing branch and pr",
       "_origin": "semantic",
       "id": "todo_update_flag"
@@ -3103,7 +3103,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "when to continue \u2014 the six-row branch state table",
       "_origin": "semantic",
       "id": "todo_when_to_continue_table"
@@ -3118,13 +3118,13 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "working agreement (red/green tdd, one item at a time)",
       "_origin": "semantic",
       "id": "todo_working_agreement"
     },
     {
-      "label": "mkprs Design Notes",
+      "label": "mkprs Design Decisions",
       "file_type": "document",
       "source_file": "design-decisions.md",
       "source_location": null,
@@ -3133,8 +3133,8 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
-      "norm_label": "mkprs design notes",
+      "community_name": "Design Decisions and Roadmap",
+      "norm_label": "mkprs design decisions",
       "_origin": "semantic",
       "id": "design_notes"
     },
@@ -3148,7 +3148,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "mkprs open feature work (todo)",
       "_origin": "semantic",
       "id": "todo"
@@ -3163,7 +3163,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "the capture holds the user's workflow, not mkprs's bookkeeping",
       "_origin": "semantic",
       "id": "design_notes_capture_holds_user_workflow"
@@ -3178,7 +3178,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "the command must leave the repo on mkprs's branch",
       "_origin": "semantic",
       "id": "design_notes_command_must_stay_on_branch"
@@ -3193,7 +3193,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "discovery finds only outermost, non-linked repos",
       "_origin": "semantic",
       "id": "design_notes_discovery_outermost_nonlinked"
@@ -3208,7 +3208,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "execution stays serial",
       "_origin": "semantic",
       "id": "design_notes_execution_stays_serial"
@@ -3223,7 +3223,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "a failed repo is not cleaned up at all",
       "_origin": "semantic",
       "id": "design_notes_failed_repo_not_cleaned_up"
@@ -3238,7 +3238,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "a failure is a repo you will have to run again for",
       "_origin": "semantic",
       "id": "design_notes_failure_is_a_repo_to_run_again"
@@ -3253,7 +3253,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "mkprs never moves a branch to a commit it did not create",
       "_origin": "semantic",
       "id": "design_notes_never_moves_a_branch"
@@ -3268,7 +3268,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "no \"i did manual work, just open the pr\" mode",
       "_origin": "semantic",
       "id": "design_notes_no_manual_work_pr_mode"
@@ -3283,7 +3283,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "prs always target the repo's own default branch",
       "_origin": "semantic",
       "id": "design_notes_pr_targets_default_branch"
@@ -3298,7 +3298,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "the repo, not the directory, is the unit of work",
       "_origin": "semantic",
       "id": "design_notes_repo_is_unit_of_work"
@@ -3313,7 +3313,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "stdout is the report; stderr is everything else",
       "_origin": "semantic",
       "id": "design_notes_stdout_is_the_report"
@@ -3328,7 +3328,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "a target is a repo or a place to find them",
       "_origin": "semantic",
       "id": "design_notes_target_is_repo_or_container"
@@ -3343,7 +3343,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "tests use real git, not a faked one",
       "_origin": "semantic",
       "id": "design_notes_tests_use_real_git"
@@ -3358,7 +3358,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "safety nets ship with a default on (opt-out, not opt-in)",
       "_origin": "semantic",
       "id": "todo_safety_nets_default_on"
@@ -3373,7 +3373,7 @@
       "author": null,
       "contributor": null,
       "community": 2,
-      "community_name": "Design Notes and Roadmap",
+      "community_name": "Design Decisions and Roadmap",
       "norm_label": "never let the token reach disk, ps, or the capture",
       "_origin": "semantic",
       "id": "todo_token_redaction"

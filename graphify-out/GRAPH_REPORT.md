@@ -17,7 +17,7 @@
 ## Community Hubs (Navigation)
 - testing.T
 - app
-- Design Notes and Roadmap
+- Design Decisions and Roadmap
 - capture
 - helper_test.go
 - parseArgs
@@ -69,9 +69,9 @@ Nodes (51): testing.T, TestBranchAhead(), TestBranchLocation(), TestDefaultBranc
 Cohesion: 0.17
 Nodes (12): stepRun(), firstLine(), plural(), commandError(), expandCommand(), newRepoRun(), resolvePath(), TestExpandCommand() (+4 more)
 
-### Community 2 - "Design Notes and Roadmap"
+### Community 2 - "Design Decisions and Roadmap"
 Cohesion: 0.10
-Nodes (44): mkprs Design Notes, The capture holds the user's workflow, not mkprs's bookkeeping, The command must leave the repo on mkprs's branch, Discovery finds only outermost, non-linked repos, Execution stays serial, A failed repo is not cleaned up at all, A failure is a repo you will have to run again for, mkprs never moves a branch to a commit it did not create (+36 more)
+Nodes (44): mkprs Design Decisions, The capture holds the user's workflow, not mkprs's bookkeeping, The command must leave the repo on mkprs's branch, Discovery finds only outermost, non-linked repos, Execution stays serial, A failed repo is not cleaned up at all, A failure is a repo you will have to run again for, mkprs never moves a branch to a commit it did not create (+36 more)
 
 ### Community 3 - "capture"
 Cohesion: 0.08
