@@ -128,17 +128,12 @@ func (a *app) processAll(repos []string) int {
 
 		res := r.process()
 		r.output.flush()
+		rep.record(name, res, r.output)
 
-		// Prevent panic from calling method on nil outcome
-		if res == nil {
-			res = r.fail("internal error: process returned no outcome")
-		}
-		res.report(rep, name)
-
-		if res.failed() && a.cfg.stopOnFailure {
+		if res.kind == failed && a.cfg.stopOnFailure {
 			if left := len(repos) - i - 1; left > 0 {
 				fmt.Fprintln(a.out, "Stopped at the first failure.")
-				rep.notProcessed = left
+				rep.notProcessedCount = left
 			}
 			break
 		}
@@ -146,7 +141,7 @@ func (a *app) processAll(repos []string) int {
 
 	rep.summary()
 
-	if rep.failed > 0 {
+	if rep.failedCount > 0 {
 		return exitFailure
 	}
 

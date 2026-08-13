@@ -4,7 +4,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -209,12 +208,11 @@ func TestPreflight(t *testing.T) {
 		writeFile(t, filepath.Join(repo, ".git", "index"), "not an index\n")
 
 		_, res := stepRun(config{branch: "b"}, repo, nil).preflight()
-		failed, ok := res.(outcomeFailed)
-		if !ok {
-			t.Fatalf("outcome = %T, want a failure", res)
+		if res == nil || res.kind != failed {
+			t.Fatalf("outcome = %v, want a failure", res)
 		}
-		if !strings.Contains(failed.reason, ".git/index") {
-			t.Errorf("reason = %q, want it to carry git's account of the index", failed.reason)
+		if !strings.Contains(res.reason, ".git/index") {
+			t.Errorf("reason = %q, want it to carry git's account of the index", res.reason)
 		}
 	})
 
@@ -230,18 +228,12 @@ func TestPreflight(t *testing.T) {
 				t.Fatalf("preflight carried on, want %q", tt.want)
 			}
 
-			var reason string
-			var fails bool
-			switch o := res.(type) {
-			case outcomeSkipped:
-				reason = o.reason
-			case outcomeFailed:
-				reason, fails = o.reason, true
-			default:
-				t.Fatalf("outcome = %T, want a skip or a failure", res)
+			if res.kind == succeeded {
+				t.Fatalf("outcome = %v, want a skip or a failure", res.kind)
 			}
 
-			if fails != tt.fails {
+			reason := res.reason
+			if fails := res.kind == failed; fails != tt.fails {
 				t.Errorf("failure = %v, want %v", fails, tt.fails)
 			}
 			// A prefix, because a reason that could not answer its question
@@ -270,26 +262,26 @@ func TestCleanup(t *testing.T) {
 	}{
 		{
 			name:        "success",
-			res:         success("https://github.com/fake/x/pull/7"),
+			res:         *success("https://github.com/fake/x/pull/7"),
 			wantRestore: true,
 		},
 		{
 			// Nothing worth keeping, so the branch goes with it.
 			name:        "a skip",
-			res:         skip("command made no changes"),
+			res:         *skip("command made no changes"),
 			wantRestore: true,
 		},
 		{
 			// The branch, its commits and any uncommitted edits are the only
 			// record of what broke.
 			name:        "a failure",
-			res:         failure("command exited 1", nil),
+			res:         *failure("command exited 1"),
 			wantRestore: false,
 		},
 		{
 			name:        "-k",
 			keepBranch:  true,
-			res:         success("https://github.com/fake/x/pull/7"),
+			res:         *success("https://github.com/fake/x/pull/7"),
 			wantRestore: false,
 		},
 		{
@@ -297,7 +289,7 @@ func TestCleanup(t *testing.T) {
 			// other: both mean leave the repo alone.
 			name:        "-k and a failure",
 			keepBranch:  true,
-			res:         failure("command exited 1", nil),
+			res:         *failure("command exited 1"),
 			wantRestore: false,
 		},
 	}
@@ -479,10 +471,9 @@ func TestCommitAndPush(t *testing.T) {
 		// setup runs with the working branch already checked out, standing in
 		// for whatever the user's command did.
 		setup func(t *testing.T, repo string)
-		// want is the reason, and wantKind the variant it arrives as. An empty
-		// reason means the repo carries on to the PR.
-		want     string
-		wantKind outcome
+		// want is the whole outcome, kind and reason together. A nil want means
+		// the repo carries on to the PR.
+		want *outcome
 	}{
 		{
 			name: "the command edited the tree",
@@ -501,10 +492,9 @@ func TestCommitAndPush(t *testing.T) {
 			},
 		},
 		{
-			name:     "the command changed nothing",
-			setup:    func(t *testing.T, repo string) {},
-			want:     "command made no changes",
-			wantKind: outcomeSkipped{},
+			name:  "the command changed nothing",
+			setup: func(t *testing.T, repo string) {},
+			want:  skip("command made no changes"),
 		},
 		{
 			// Staging and committing act on whatever HEAD points at, so this
@@ -513,16 +503,14 @@ func TestCommitAndPush(t *testing.T) {
 			setup: func(t *testing.T, repo string) {
 				gitCmd(t, repo, "checkout", "-q", "-b", "elsewhere")
 			},
-			want:     "command left the repo on 'elsewhere', not 'b'",
-			wantKind: outcomeFailed{},
+			want: failure("command left the repo on 'elsewhere', not 'b'"),
 		},
 		{
 			name: "the command detached HEAD",
 			setup: func(t *testing.T, repo string) {
 				gitCmd(t, repo, "checkout", "-q", "--detach")
 			},
-			want:     "command left the repo with a detached HEAD",
-			wantKind: outcomeFailed{},
+			want: failure("command left the repo with a detached HEAD"),
 		},
 		{
 			name: "the branch cannot be pushed",
@@ -530,8 +518,7 @@ func TestCommitAndPush(t *testing.T) {
 				writeFile(t, filepath.Join(repo, "file.txt"), "changed\n")
 				gitCmd(t, repo, "remote", "set-url", "origin", "git@github.com:fake/gone.git")
 			},
-			want:     "unable to push to origin/b",
-			wantKind: outcomeFailed{},
+			want: failure("unable to push to origin/b"),
 		},
 	}
 
@@ -548,7 +535,7 @@ func TestCommitAndPush(t *testing.T) {
 			p := prep{defaultBranch: "main", base: "origin/main", startBranch: "main"}
 			got := stepRun(cfg, repo, nil).commitAndPush(p)
 
-			if tt.want == "" {
+			if tt.want == nil {
 				if got != nil {
 					t.Fatalf("commitAndPush = %#v, want it to carry on", got)
 				}
@@ -564,20 +551,10 @@ func TestCommitAndPush(t *testing.T) {
 			}
 
 			if got == nil {
-				t.Fatalf("commitAndPush carried on, want %q", tt.want)
+				t.Fatalf("commitAndPush carried on, want %+v", *tt.want)
 			}
-			if reflect.TypeOf(got) != reflect.TypeOf(tt.wantKind) {
-				t.Errorf("outcome = %T, want %T", got, tt.wantKind)
-			}
-			var reason string
-			switch o := got.(type) {
-			case outcomeSkipped:
-				reason = o.reason
-			case outcomeFailed:
-				reason = o.reason
-			}
-			if reason != tt.want {
-				t.Errorf("reason = %q, want %q", reason, tt.want)
+			if *got != *tt.want {
+				t.Errorf("outcome = %+v, want %+v", *got, *tt.want)
 			}
 			// A repo that ends here never reaches origin.
 			if f.remoteHasBranch("x", "b") {

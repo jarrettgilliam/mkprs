@@ -2,63 +2,41 @@ package mkprs
 
 import "fmt"
 
-// outcome is the closed set of ways a repo can end up. A skip is a normal
+// outcomeKind is the closed set of ways a repo can end up. A skip is a normal
 // result (nothing to do here), not an error, hence three states rather than an
-// error and its absence. Each variant renders and counts itself, so nothing
-// outside has to know which one it is holding.
-type outcome interface {
-	// report renders this result and counts it. Unexported, so no type outside
-	// this package can implement outcome.
-	report(r *reporter, name string)
-	// failed reports whether this is the outcome that -s stops for and that
-	// cleanup leaves alone -- see design-decisions.md, a failure is a repo you will
-	// have to run again for. It exists so those two callers do not have to
-	// assert on the concrete type and reopen what this interface closes.
-	failed() bool
-}
+// error and its absence.
+//
+// failed is the zero value on purpose: an outcome nobody filled in counts as a
+// repo to come back to, never as a silent success.
+type outcomeKind int
 
-type outcomeSuccess struct{ prURL string }
+const (
+	failed outcomeKind = iota
+	skipped
+	succeeded
+)
 
-type outcomeSkipped struct{ reason string }
-
-type outcomeFailed struct {
-	reason string
-	// output is still being written to when this is built: the deferred
-	// restoreRepo runs before the caller reports.
-	output *capture
-}
-
-func success(prURL string) outcome { return outcomeSuccess{prURL: prURL} }
-func skip(reason string) outcome   { return outcomeSkipped{reason: reason} }
-func failure(reason string, output *capture) outcome {
-	return outcomeFailed{reason: reason, output: output}
-}
-
-func (o outcomeSuccess) failed() bool { return false }
-func (o outcomeSkipped) failed() bool { return false }
-func (o outcomeFailed) failed() bool  { return true }
-
-func (o outcomeSuccess) report(r *reporter, name string) {
-	// gh can exit 0 without a parseable URL on stdout. The PR still exists, so
-	// this reports success and simply omits the link.
-	suffix := ""
-	if o.prURL != "" {
-		suffix = "  " + o.prURL
+func (k outcomeKind) String() string {
+	switch k {
+	case failed:
+		return "failed"
+	case skipped:
+		return "skipped"
+	case succeeded:
+		return "succeeded"
 	}
-	fmt.Fprintf(r.out, "✅ %-*s PR created%s\n", r.width, name, suffix)
-	r.succeeded++
+	return fmt.Sprintf("outcomeKind(%d)", int(k))
 }
 
-func (o outcomeSkipped) report(r *reporter, name string) {
-	fmt.Fprintf(r.out, "⏭️  %-*s skipped: %s\n", r.width, name, o.reason)
-	r.skipped++
+// A *outcome is the same answer where it may not have arrived yet -- preflight
+// and commitAndPush return nil to mean "carry on". process, work and openPR
+// return the value, which is always a real result.
+type outcome struct {
+	kind   outcomeKind
+	prURL  string // succeeded only
+	reason string // skipped and failed only
 }
 
-func (o outcomeFailed) report(r *reporter, name string) {
-	fmt.Fprintf(r.out, "❌ %-*s %s\n", r.width, name, o.reason)
-	// Under --verbose the output has already streamed past; don't repeat it.
-	if !o.output.verbose && !o.output.empty() {
-		fmt.Fprint(r.out, o.output.indented())
-	}
-	r.failed++
-}
+func success(prURL string) *outcome  { return &outcome{kind: succeeded, prURL: prURL} }
+func skip(reason string) *outcome    { return &outcome{kind: skipped, reason: reason} }
+func failure(reason string) *outcome { return &outcome{kind: failed, reason: reason} }
