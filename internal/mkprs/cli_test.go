@@ -36,8 +36,8 @@ func TestParseArgsUsageErrors(t *testing.T) {
 			t.Parallel()
 
 			cfg, _, err := parseArgs(tt.args)
-			if cfg != nil {
-				t.Errorf("config = %+v, want nil", cfg)
+			if !reflect.DeepEqual(cfg, config{}) {
+				t.Errorf("config = %+v, want the zero config", cfg)
 			}
 
 			if err == nil {
@@ -76,18 +76,18 @@ func TestParseArgsKeepsValuesStartingWithDashDash(t *testing.T) {
 var flagRows = []struct {
 	long, short string
 	value       string // empty for a bool
-	get         func(*config) any
+	get         func(config) any
 }{
-	{"branch", "b", "my-branch", func(c *config) any { return c.branch }},
-	{"message", "m", "commit msg", func(c *config) any { return c.message }},
-	{"title", "t", "pr title", func(c *config) any { return c.title }},
-	{"body", "B", "pr body", func(c *config) any { return c.body }},
-	{"reviewer", "r", "alice,bob", func(c *config) any { return c.reviewers }},
-	{"draft", "d", "", func(c *config) any { return c.draft }},
-	{"keep-branch", "k", "", func(c *config) any { return c.keepBranch }},
-	{"verbose", "v", "", func(c *config) any { return c.verbose }},
-	{"stop-on-failure", "s", "", func(c *config) any { return c.stopOnFailure }},
-	{"max-repos", "", "84", func(c *config) any { return strconv.Itoa(c.maxRepos) }},
+	{"branch", "b", "my-branch", func(c config) any { return c.branch }},
+	{"message", "m", "commit msg", func(c config) any { return c.message }},
+	{"title", "t", "pr title", func(c config) any { return c.title }},
+	{"body", "B", "pr body", func(c config) any { return c.body }},
+	{"reviewer", "r", "alice,bob", func(c config) any { return c.reviewers }},
+	{"draft", "d", "", func(c config) any { return c.draft }},
+	{"keep-branch", "k", "", func(c config) any { return c.keepBranch }},
+	{"verbose", "v", "", func(c config) any { return c.verbose }},
+	{"stop-on-failure", "s", "", func(c config) any { return c.stopOnFailure }},
+	{"max-repos", "", "84", func(c config) any { return strconv.Itoa(c.maxRepos) }},
 }
 
 // flagForms returns every spelling pflag accepts for a flag, as argv fragments.
@@ -155,8 +155,8 @@ func TestParseArgsFlagForms(t *testing.T) {
 // row breaks the suite immediately.
 //
 // The exemption list is where a check like this rots, so it stays at one entry
-// with a reason: --help returns pflag.ErrHelp and a nil config, so it cannot be
-// driven through the table at all.
+// with a reason: --help returns pflag.ErrHelp and the zero config, so it cannot
+// be driven through the table at all.
 func TestParseArgsFlagFormsCoversEveryFlag(t *testing.T) {
 	t.Parallel()
 
@@ -212,7 +212,7 @@ func TestParseArgsFlagOrder(t *testing.T) {
 				t.Fatalf("parseArgs: %v", err)
 			}
 			if !reflect.DeepEqual(cfg, want) {
-				t.Errorf("config = %+v,\n          want %+v", *cfg, *want)
+				t.Errorf("config = %+v,\n          want %+v", cfg, want)
 			}
 		})
 	}
@@ -306,6 +306,59 @@ func TestParseArgsMaxReposDefaultsOn(t *testing.T) {
 	}
 	if got, want := cfg.maxRepos, defaultMaxRepos; got != want {
 		t.Errorf("maxRepos = %d, want %d", got, want)
+	}
+}
+
+// A config leaves parseArgs with nothing left open, so no caller has to tell a
+// value the user gave from one that was defaulted.
+func TestParseArgsFillsMessageAndTitle(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		args        []string
+		command     []string
+		wantMessage string
+		wantTitle   string
+	}{
+		{
+			name:        "both default to the command text",
+			args:        []string{"/tmp", "-b", "x"},
+			command:     []string{"sed", "-i", "s/a/b/", "README.md"},
+			wantMessage: "sed -i s/a/b/ README.md",
+			wantTitle:   "sed -i s/a/b/ README.md",
+		},
+		{
+			name:        "title defaults to the first line of the message",
+			args:        []string{"/tmp", "-b", "x", "-m", "Fix typo\n\nThe long version."},
+			command:     []string{"true"},
+			wantMessage: "Fix typo\n\nThe long version.",
+			wantTitle:   "Fix typo",
+		},
+		{
+			name:        "both given, neither touched",
+			args:        []string{"/tmp", "-b", "x", "-m", "commit msg", "-t", "pr title"},
+			command:     []string{"true"},
+			wantMessage: "commit msg",
+			wantTitle:   "pr title",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, _, err := parseArgs(append(append(tt.args, "--"), tt.command...))
+			if err != nil {
+				t.Fatalf("parseArgs: %v", err)
+			}
+			if got := cfg.message; got != tt.wantMessage {
+				t.Errorf("message = %q, want %q", got, tt.wantMessage)
+			}
+			if got := cfg.title; got != tt.wantTitle {
+				t.Errorf("title = %q, want %q", got, tt.wantTitle)
+			}
+		})
 	}
 }
 

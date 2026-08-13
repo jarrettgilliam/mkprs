@@ -76,7 +76,7 @@ func TestPreflight(t *testing.T) {
 		// by accidentally agreeing with defaultBranch.
 		gitCmd(t, repo, "checkout", "-q", "-b", "feature")
 
-		p, res := stepRun(&app{cfg: &config{branch: "b"}}, repo, nil).preflight()
+		p, res := stepRun(config{branch: "b"}, repo, nil).preflight()
 		if res != nil {
 			t.Fatalf("preflight = %#v, want it to carry on", res)
 		}
@@ -206,7 +206,7 @@ func TestPreflight(t *testing.T) {
 			f := newFixture(t)
 			repo := tt.setup(t, f)
 
-			p, res := stepRun(&app{cfg: &config{branch: "b"}}, repo, nil).preflight()
+			p, res := stepRun(config{branch: "b"}, repo, nil).preflight()
 			if res == nil {
 				t.Fatalf("preflight carried on, want %q", tt.want)
 			}
@@ -290,8 +290,8 @@ func TestCleanup(t *testing.T) {
 			gitCmd(t, repo, "checkout", "-q", "-b", "feature")
 			gitCmd(t, repo, "checkout", "-q", "-b", "b")
 
-			a := &app{cfg: &config{branch: "b", keepBranch: tt.keepBranch}}
-			stepRun(a, repo, nil).cleanup(tt.res, "feature")
+			cfg := config{branch: "b", keepBranch: tt.keepBranch}
+			stepRun(cfg, repo, nil).cleanup(tt.res, "feature")
 
 			wantBranch := "b"
 			if tt.wantRestore {
@@ -345,9 +345,9 @@ func TestRunCommandContext(t *testing.T) {
 
 			f := newFixture(t)
 			repo := f.repo("x")
-			a := &app{cfg: &config{command: tt.command(t)}}
+			cfg := config{command: tt.command(t)}
 
-			if err := stepRun(a, repo, nil).runCommand(); err != nil {
+			if err := stepRun(cfg, repo, nil).runCommand(); err != nil {
 				t.Fatalf("runCommand: %v", err)
 			}
 
@@ -369,9 +369,9 @@ func TestRunCommand(t *testing.T) {
 		f := newFixture(t)
 		repo := f.repo("x")
 		c := newCapture("x", false, io.Discard)
-		a := &app{cfg: &config{command: helperCmd(t, "writeprint", "out.txt", "hello")}}
+		cfg := config{command: helperCmd(t, "writeprint", "out.txt", "hello")}
 
-		if err := stepRun(a, repo, c).runCommand(); err != nil {
+		if err := stepRun(cfg, repo, c).runCommand(); err != nil {
 			t.Fatalf("runCommand: %v", err)
 		}
 		// Both streams reach the capture, which is what a failure replays.
@@ -389,9 +389,9 @@ func TestRunCommand(t *testing.T) {
 
 		f := newFixture(t)
 		c := newCapture("x", false, io.Discard)
-		a := &app{cfg: &config{command: helperCmd(t, "fail", "3", "went wrong")}}
+		cfg := config{command: helperCmd(t, "fail", "3", "went wrong")}
 
-		err := stepRun(a, f.repo("x"), c).runCommand()
+		err := stepRun(cfg, f.repo("x"), c).runCommand()
 		if err == nil {
 			t.Fatal("runCommand succeeded, want an error")
 		}
@@ -409,9 +409,9 @@ func TestRunCommand(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		a := &app{cfg: &config{command: []string{"mkprs-no-such-binary"}}}
+		cfg := config{command: []string{"mkprs-no-such-binary"}}
 
-		err := stepRun(a, f.repo("x"), nil).runCommand()
+		err := stepRun(cfg, f.repo("x"), nil).runCommand()
 		if err == nil {
 			t.Fatal("runCommand succeeded, want an error")
 		}
@@ -433,9 +433,9 @@ func TestRunCommand(t *testing.T) {
 		}
 
 		f := newFixture(t)
-		a := &app{cfg: &config{command: helperCmd(t, "kill")}}
+		cfg := config{command: helperCmd(t, "kill")}
 
-		err := stepRun(a, f.repo("x"), nil).runCommand()
+		err := stepRun(cfg, f.repo("x"), nil).runCommand()
 		if err == nil {
 			t.Fatal("runCommand succeeded, want an error")
 		}
@@ -523,9 +523,9 @@ func TestCommitAndPush(t *testing.T) {
 			gitCmd(t, repo, "checkout", "-q", "-b", "b", "origin/main")
 			tt.setup(t, repo)
 
-			a := &app{cfg: &config{branch: "b", message: "commit msg"}}
+			cfg := config{branch: "b", message: "commit msg"}
 			p := prep{defaultBranch: "main", base: "origin/main", startBranch: "main"}
-			got := stepRun(a, repo, nil).commitAndPush(p)
+			got := stepRun(cfg, repo, nil).commitAndPush(p)
 
 			if tt.want == "" {
 				if got != nil {

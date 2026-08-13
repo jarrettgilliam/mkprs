@@ -316,12 +316,13 @@ func newFixture(t *testing.T) *fixture {
 }
 
 // stepRun builds a repoRun for the tests that drive a single pipeline step
-// rather than a whole run. A nil output means the test does not read it.
-func stepRun(a *app, repoPath string, output *capture) *repoRun {
+// rather than a whole run. A nil output means the test does not read it; the
+// PR opener is nil because openPR is covered through a whole run instead.
+func stepRun(cfg config, repoPath string, output *capture) *repoRun {
 	if output == nil {
 		output = newCapture("x", false, io.Discard)
 	}
-	return newRepoRun(a, repoPath, output)
+	return newRepoRun(cfg, nil, repoPath, output)
 }
 
 // at wraps a fixture path so the git methods can be called on it. The fixtures

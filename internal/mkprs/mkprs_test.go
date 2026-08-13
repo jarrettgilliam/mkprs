@@ -53,21 +53,9 @@ func TestRunOpensPullRequest(t *testing.T) {
 func TestRunPullRequestFields(t *testing.T) {
 	t.Parallel()
 
-	t.Run("title defaults to the commit message", func(t *testing.T) {
-		t.Parallel()
-
-		f := newFixture(t)
-		f.repo("x")
-		prs := &fakePR{}
-
-		run(t, prs, []string{f.targets, "-b", "b", "-m", "First line\nsecond line"}, helperCmd(t, "write", "file.txt", "x")...)
-
-		if got, want := prs.only(t).pr.Title, "First line"; got != want {
-			t.Errorf("title = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("message defaults to the command text", func(t *testing.T) {
+	// The defaults themselves are TestParseArgsFillsMessageAndTitle's; what
+	// needs a whole run is that the defaulted message reaches git.
+	t.Run("the defaulted message becomes the commit subject", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
@@ -77,11 +65,7 @@ func TestRunPullRequestFields(t *testing.T) {
 		command := helperCmd(t, "write", "file.txt", "x")
 		run(t, prs, []string{f.targets, "-b", "b"}, command...)
 
-		want := strings.Join(command, " ")
-		if got := prs.only(t).pr.Title; got != want {
-			t.Errorf("title = %q, want the command text %q", got, want)
-		}
-		if got := f.remoteSubject("x", "b"); got != want {
+		if got, want := f.remoteSubject("x", "b"), strings.Join(command, " "); got != want {
 			t.Errorf("commit subject = %q, want the command text %q", got, want)
 		}
 	})

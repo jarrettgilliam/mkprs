@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/pflag"
 )
@@ -21,7 +20,7 @@ const (
 // exists so that nothing below Run reaches for os.Stdout, os.Stderr, or the gh
 // binary directly.
 type app struct {
-	cfg    *config
+	cfg    config
 	out    io.Writer
 	errOut io.Writer
 	prs    prOpener
@@ -32,6 +31,7 @@ type app struct {
 // place that can end the process.
 func Run(args []string, stdout, stderr io.Writer) int {
 	cfg, fs, err := parseArgs(args)
+
 	if err != nil {
 		if errors.Is(err, pflag.ErrHelp) {
 			printUsage(stdout, fs)
@@ -44,11 +44,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	a := &app{cfg: cfg, out: stdout, errOut: stderr, prs: ghCLI{}}
+
 	return a.run()
 }
 
 func (a *app) run() int {
-	if err := a.prepare(); err != nil {
+	if err := validateBranchName(a.cfg.branch); err != nil {
 		fmt.Fprintf(a.errOut, "Error: %v\n", err)
 		return exitUsage
 	}
@@ -70,22 +71,6 @@ func (a *app) run() int {
 	}
 
 	return a.processAll(repos)
-}
-
-// prepare checks what can be checked without touching a repo and fills in the
-// values the rest of the run assumes are set.
-func (a *app) prepare() error {
-	if err := validateBranchName(a.cfg.branch); err != nil {
-		return err
-	}
-
-	if a.cfg.message == "" {
-		a.cfg.message = strings.Join(a.cfg.command, " ")
-	}
-	if a.cfg.title == "" {
-		a.cfg.title = firstLine(a.cfg.message)
-	}
-	return nil
 }
 
 // collectRepos expands every target into the deduplicated list of repos to
@@ -139,7 +124,7 @@ func (a *app) processAll(repos []string) int {
 
 	for i, repoPath := range repos {
 		name := filepath.Base(repoPath)
-		r := newRepoRun(a, repoPath, newCapture(name, a.cfg.verbose, a.out))
+		r := newRepoRun(a.cfg, a.prs, repoPath, newCapture(name, a.cfg.verbose, a.out))
 
 		res := r.process()
 		r.output.flush()
@@ -190,11 +175,4 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
 }

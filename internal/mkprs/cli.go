@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/spf13/pflag"
 )
@@ -55,8 +56,8 @@ func checkFlagValues(fs *pflag.FlagSet) error {
 // the caller can render usage. Problems come back as errors -- deciding which
 // stream to print on, and whether to exit, is the command's job. -h/--help
 // comes back as pflag.ErrHelp.
-func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
-	cfg := &config{}
+func parseArgs(args []string) (config, *pflag.FlagSet, error) {
+	var cfg config
 
 	fs := pflag.NewFlagSet("mkprs", pflag.ContinueOnError)
 	fs.SortFlags = false
@@ -77,15 +78,15 @@ func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
 	help := fs.BoolP("help", "h", false, "Show this help message")
 
 	if err := fs.Parse(args); err != nil {
-		return nil, fs, err
+		return config{}, fs, err
 	}
 
 	if *help {
-		return nil, fs, pflag.ErrHelp
+		return config{}, fs, pflag.ErrHelp
 	}
 
 	if err := checkFlagValues(fs); err != nil {
-		return nil, fs, err
+		return config{}, fs, err
 	}
 
 	// Everything before `--` is a target dir; everything after is the command.
@@ -100,12 +101,26 @@ func parseArgs(args []string) (*config, *pflag.FlagSet, error) {
 
 	switch {
 	case len(cfg.targetDirs) < 1:
-		return nil, fs, errors.New("must specify at least one target dir")
+		return config{}, fs, errors.New("must specify at least one target dir")
 	case cfg.branch == "":
-		return nil, fs, errors.New("-b/--branch is required")
+		return config{}, fs, errors.New("-b/--branch is required")
 	case len(cfg.command) == 0:
-		return nil, fs, errors.New("no command specified (everything after -- is the command to run)")
+		return config{}, fs, errors.New("no command specified (everything after -- is the command to run)")
+	}
+
+	if cfg.message == "" {
+		cfg.message = strings.Join(cfg.command, " ")
+	}
+	if cfg.title == "" {
+		cfg.title = firstLine(cfg.message)
 	}
 
 	return cfg, fs, nil
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }

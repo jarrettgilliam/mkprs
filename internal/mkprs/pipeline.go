@@ -9,30 +9,27 @@ import (
 )
 
 // repoRun is one repository's turn through the pipeline.
-//
-// repo is embedded, so the git helpers and the capture read directly. app is
-// not: embedding it would promote run, processAll and collectRepos onto a
-// per-repo value, where they are nonsense.
 type repoRun struct {
-	a *app
+	cfg config
+	prs prOpener
 	repo
 }
 
-func newRepoRun(a *app, repoPath string, output *capture) *repoRun {
-	return &repoRun{a: a, repo: repo{path: repoPath, output: output}}
+func newRepoRun(cfg config, prs prOpener, repoPath string, output *capture) *repoRun {
+	return &repoRun{cfg: cfg, prs: prs, repo: repo{path: repoPath, output: output}}
 }
 
 // fail ends this repo, replaying its output under the reason.
 func (r *repoRun) fail(reason string) outcome { return failure(reason, r.output) }
 
 func (r *repoRun) openPR(base string) outcome {
-	url, err := r.a.prs.open(r.path, pullRequest{
+	url, err := r.prs.open(r.path, pullRequest{
 		Base:      base,
-		Head:      r.a.cfg.branch,
-		Title:     r.a.cfg.title,
-		Body:      r.a.cfg.body,
-		Reviewers: r.a.cfg.reviewers,
-		Draft:     r.a.cfg.draft,
+		Head:      r.cfg.branch,
+		Title:     r.cfg.title,
+		Body:      r.cfg.body,
+		Reviewers: r.cfg.reviewers,
+		Draft:     r.cfg.draft,
 	}, r.output)
 	if err != nil {
 		return r.fail(err.Error())
@@ -56,7 +53,7 @@ type prep struct {
 // reads the names the rest of process needs. A non-nil outcome means stop;
 // prep is meaningless in that case.
 func (r *repoRun) preflight() (prep, outcome) {
-	branch := r.a.cfg.branch
+	branch := r.cfg.branch
 
 	if ok, note := r.isGitHubRepo(); !ok {
 		return prep{}, skip(note)
@@ -120,7 +117,7 @@ func expandCommand(command []string, abs string) []string {
 // Both opt-outs mean "leave the repo alone" rather than "delete the branch but
 // stay put" -- see repo.restore for why that is all or nothing.
 func (r *repoRun) cleanup(res outcome, startBranch string) {
-	if r.a.cfg.keepBranch {
+	if r.cfg.keepBranch {
 		return
 	}
 	// The nil check is not redundant: every path that reaches the deferred
@@ -129,7 +126,7 @@ func (r *repoRun) cleanup(res outcome, startBranch string) {
 	if res != nil && res.failed() {
 		return
 	}
-	r.restore(startBranch, r.a.cfg.branch)
+	r.restore(startBranch, r.cfg.branch)
 }
 
 // runCommand runs the user's command in the repo, with both streams going to
@@ -139,7 +136,7 @@ func (r *repoRun) cleanup(res outcome, startBranch string) {
 // cannot consume input meant for mkprs itself.
 func (r *repoRun) runCommand() error {
 	abs := resolvePath(r.path)
-	expanded := expandCommand(r.a.cfg.command, abs)
+	expanded := expandCommand(r.cfg.command, abs)
 
 	cmd := exec.Command(expanded[0], expanded[1:]...)
 	cmd.Dir = r.path
@@ -158,7 +155,7 @@ func (r *repoRun) runCommand() error {
 // repo here. It returns an outcome rather than an error because "the command
 // changed nothing" is a skip, not a failure.
 func (r *repoRun) commitAndPush(p prep) outcome {
-	branch := r.a.cfg.branch
+	branch := r.cfg.branch
 
 	work, ok := r.headBranch()
 	if !ok {
@@ -175,7 +172,7 @@ func (r *repoRun) commitAndPush(p prep) outcome {
 	// --quiet exits 0 when there is nothing staged. Nothing staged is not the
 	// same as nothing done: the command may have committed its own work.
 	if !r.git(nothingStaged()).ok() {
-		if err := r.git(commit(r.a.cfg.message)).toLog().run(); err != nil {
+		if err := r.git(commit(r.cfg.message)).toLog().run(); err != nil {
 			return r.fail("could not commit")
 		}
 	}
@@ -208,7 +205,7 @@ func (r *repoRun) process() (res outcome) {
 		return res
 	}
 
-	if err := r.git(createBranch(r.a.cfg.branch, p.base)).toLog().run(); err != nil {
+	if err := r.git(createBranch(r.cfg.branch, p.base)).toLog().run(); err != nil {
 		return r.fail("could not create branch")
 	}
 	// The branch exists from here on, so the repo needs restoring however we leave.
