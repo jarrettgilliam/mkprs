@@ -65,14 +65,16 @@ func (g *gitRun) text() (string, error) {
 	return strings.TrimSpace(out.String()), err
 }
 
-// gitError folds git's own stderr into the error text: an *exec.ExitError
-// reports only "exit status 1", so a caller that wraps it loses the one line
-// explaining it.
+// gitError replaces the error with git's own complaint whenever there is one:
+// an *exec.ExitError reports "exit status 128" and nothing else, which tells a
+// reader nothing, and the code itself is not worth carrying into a reason line.
+// Redirected stderr leaves the buffer empty and the error alone -- repeating a
+// complaint the capture already holds would print it twice.
 func gitError(err error, stderr string) error {
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		if msg := strings.TrimSpace(stderr); msg != "" {
-			return fmt.Errorf("%w: %s", err, msg)
+			return errors.New(msg)
 		}
 	}
 	return err

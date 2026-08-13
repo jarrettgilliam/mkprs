@@ -43,14 +43,14 @@ func (r *repo) isGitHubRepo() (bool, string) {
 	return true, ""
 }
 
-// isCleanTree reports whether the working tree has no changes, and whether the
-// question could be answered at all.
-func (r *repo) isCleanTree() (clean, ok bool) {
+// isCleanTree reports whether the working tree has no changes. An error means
+// the question could not be answered at all, and carries git's account of why.
+func (r *repo) isCleanTree() (bool, error) {
 	out, err := git(r.path, status()).text()
 	if err != nil {
-		return false, false
+		return false, err
 	}
-	return out == "", true
+	return out == "", nil
 }
 
 // defaultBranch resolves the repo's default branch, preferring origin/HEAD and
@@ -102,15 +102,15 @@ func (r *repo) headBranch() (string, bool) {
 	return name, true
 }
 
-// branchAhead reports whether branch carries commits that base does not, and
-// whether the question could be answered at all. This is what decides that a
-// repo has something to open a PR for.
-func (r *repo) branchAhead(base, branch string) (ahead, ok bool) {
+// branchAhead reports whether branch carries commits that base does not. This
+// is what decides that a repo has something to open a PR for, so an error --
+// which carries git's account of why -- must not read as "nothing to do".
+func (r *repo) branchAhead(base, branch string) (bool, error) {
 	out, err := git(r.path, commitsAhead(base, branch)).text()
 	if err != nil {
-		return false, false
+		return false, err
 	}
-	return out != "0", true
+	return out != "0", nil
 }
 
 // restore abandons the working branch and returns the repo to startBranch.

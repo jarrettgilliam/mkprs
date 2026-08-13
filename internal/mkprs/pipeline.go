@@ -48,9 +48,9 @@ func (r *repo) preflight() (prep, outcome) {
 		return prep{}, skip(note)
 	}
 
-	clean, ok := r.isCleanTree()
-	if !ok {
-		return prep{}, r.fail("could not read the working tree status")
+	clean, err := r.isCleanTree()
+	if err != nil {
+		return prep{}, r.fail(fmt.Sprintf("could not read the working tree status: %v", err))
 	}
 	if !clean {
 		return prep{}, r.fail("working tree not clean")
@@ -170,9 +170,9 @@ func (r *repo) commitAndPush(p prep) outcome {
 	// being read as a no-op and then deleted by the deferred cleanup. A command
 	// that commits and then reverts opens an empty PR, which is visible and
 	// harmless; a silently deleted commit is neither.
-	ahead, ok := r.branchAhead(p.base, branch)
-	if !ok {
-		return r.fail(fmt.Sprintf("could not compare '%s' to %s", branch, p.base))
+	ahead, err := r.branchAhead(p.base, branch)
+	if err != nil {
+		return r.fail(fmt.Sprintf("could not compare '%s' to %s: %v", branch, p.base, err))
 	}
 	if !ahead {
 		return skip("command made no changes")

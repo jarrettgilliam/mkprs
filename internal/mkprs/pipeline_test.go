@@ -199,6 +199,25 @@ func TestPreflight(t *testing.T) {
 		},
 	}
 
+	// A question mkprs could not answer has to say what git said: "could not
+	// read the working tree status" alone leaves the user nothing to fix.
+	t.Run("an unanswerable question carries git's own words", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		repo := f.repo("x")
+		writeFile(t, filepath.Join(repo, ".git", "index"), "not an index\n")
+
+		_, res := stepRun(config{branch: "b"}, repo, nil).preflight()
+		failed, ok := res.(outcomeFailed)
+		if !ok {
+			t.Fatalf("outcome = %T, want a failure", res)
+		}
+		if !strings.Contains(failed.reason, ".git/index") {
+			t.Errorf("reason = %q, want it to carry git's account of the index", failed.reason)
+		}
+	})
+
 	for _, tt := range stops {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -225,8 +244,10 @@ func TestPreflight(t *testing.T) {
 			if fails != tt.fails {
 				t.Errorf("failure = %v, want %v", fails, tt.fails)
 			}
-			if reason != tt.want {
-				t.Errorf("reason = %q, want %q", reason, tt.want)
+			// A prefix, because a reason that could not answer its question
+			// carries git's own account of why after it.
+			if !strings.HasPrefix(reason, tt.want) {
+				t.Errorf("reason = %q, want it to start with %q", reason, tt.want)
 			}
 			// Nothing downstream may read the data return once the outcome is
 			// set, so it must not be half-filled.

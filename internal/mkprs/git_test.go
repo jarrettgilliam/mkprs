@@ -149,13 +149,13 @@ func TestIsCleanTree(t *testing.T) {
 	f := newFixture(t)
 	dir := f.repo("x")
 
-	if clean, ok := at(dir).isCleanTree(); !ok || !clean {
-		t.Fatalf("isCleanTree = %v, %v; want a freshly committed repo to be clean", clean, ok)
+	if clean, err := at(dir).isCleanTree(); err != nil || !clean {
+		t.Fatalf("isCleanTree = %v, %v; want a freshly committed repo to be clean", clean, err)
 	}
 
 	writeFile(t, filepath.Join(dir, "file.txt"), "changed\n")
-	if clean, ok := at(dir).isCleanTree(); !ok || clean {
-		t.Errorf("isCleanTree = %v, %v; want a modified repo to be dirty", clean, ok)
+	if clean, err := at(dir).isCleanTree(); err != nil || clean {
+		t.Errorf("isCleanTree = %v, %v; want a modified repo to be dirty", clean, err)
 	}
 }
 
@@ -169,8 +169,8 @@ func TestIsCleanTreeUnreadable(t *testing.T) {
 	notARepo := filepath.Join(f.root, "notes")
 	mkdir(t, notARepo)
 
-	if clean, ok := at(notARepo).isCleanTree(); ok {
-		t.Errorf("isCleanTree = %v, %v; want the status to be unanswerable", clean, ok)
+	if clean, err := at(notARepo).isCleanTree(); err == nil {
+		t.Errorf("isCleanTree = %v, %v; want the status to be unanswerable", clean, err)
 	}
 }
 
@@ -183,8 +183,8 @@ func TestIsCleanTreeUntracked(t *testing.T) {
 	dir := f.repo("x")
 	writeFile(t, filepath.Join(dir, "stray.txt"), "x\n")
 
-	if clean, ok := at(dir).isCleanTree(); !ok || clean {
-		t.Errorf("isCleanTree = %v, %v; want an untracked file to make the tree dirty", clean, ok)
+	if clean, err := at(dir).isCleanTree(); err != nil || clean {
+		t.Errorf("isCleanTree = %v, %v; want an untracked file to make the tree dirty", clean, err)
 	}
 }
 
@@ -348,9 +348,9 @@ func TestBranchAhead(t *testing.T) {
 		writeFile(t, filepath.Join(dir, "file.txt"), "changed\n")
 		gitCmd(t, dir, "commit", "-q", "-a", "-m", "work")
 
-		ahead, ok := at(dir).branchAhead("main", "work")
-		if !ok {
-			t.Fatal("branchAhead could not answer")
+		ahead, err := at(dir).branchAhead("main", "work")
+		if err != nil {
+			t.Fatalf("branchAhead: %v", err)
 		}
 		if !ahead {
 			t.Error("ahead = false, want true")
@@ -364,9 +364,9 @@ func TestBranchAhead(t *testing.T) {
 		dir := f.repo("x")
 		gitCmd(t, dir, "checkout", "-q", "-b", "work")
 
-		ahead, ok := at(dir).branchAhead("main", "work")
-		if !ok {
-			t.Fatal("branchAhead could not answer")
+		ahead, err := at(dir).branchAhead("main", "work")
+		if err != nil {
+			t.Fatalf("branchAhead: %v", err)
 		}
 		if ahead {
 			t.Error("ahead = true, want false")
@@ -379,8 +379,8 @@ func TestBranchAhead(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		if _, ok := at(f.repo("x")).branchAhead("main", "no-such-branch"); ok {
-			t.Error("ok = true, want false for a ref that does not exist")
+		if _, err := at(f.repo("x")).branchAhead("main", "no-such-branch"); err == nil {
+			t.Error("err = nil, want a failure for a ref that does not exist")
 		}
 	})
 }
