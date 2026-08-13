@@ -8,21 +8,10 @@ import (
 	"path/filepath"
 )
 
-// repoRun is one repository's turn through the pipeline.
-type repoRun struct {
-	cfg config
-	prs prOpener
-	repo
-}
-
-func newRepoRun(cfg config, prs prOpener, repoPath string, output *capture) *repoRun {
-	return &repoRun{cfg: cfg, prs: prs, repo: repo{path: repoPath, output: output}}
-}
-
 // fail ends this repo, replaying its output under the reason.
-func (r *repoRun) fail(reason string) outcome { return failure(reason, r.output) }
+func (r *repo) fail(reason string) outcome { return failure(reason, r.output) }
 
-func (r *repoRun) openPR(base string) outcome {
+func (r *repo) openPR(base string) outcome {
 	url, err := r.prs.open(r.path, pullRequest{
 		Base:      base,
 		Head:      r.cfg.branch,
@@ -52,7 +41,7 @@ type prep struct {
 // preflight runs every check that can end a repo before its command does, and
 // reads the names the rest of process needs. A non-nil outcome means stop;
 // prep is meaningless in that case.
-func (r *repoRun) preflight() (prep, outcome) {
+func (r *repo) preflight() (prep, outcome) {
 	branch := r.cfg.branch
 
 	if ok, note := r.isGitHubRepo(); !ok {
@@ -70,7 +59,7 @@ func (r *repoRun) preflight() (prep, outcome) {
 	// Fetch before any decision that reads a ref. --prune clears
 	// refs/remotes/origin/<branch> after a PR is merged and its branch deleted
 	// upstream; checking first would skip the repo on a ref that is only stale.
-	if err := r.git(fetch()).toLog().run(); err != nil {
+	if err := git(r.path, fetch()).to(r.log(), r.log()).run(); err != nil {
 		return prep{}, r.fail("could not fetch origin")
 	}
 
@@ -116,7 +105,7 @@ func expandCommand(command []string, abs string) []string {
 // cleanup returns the repo to startBranch and deletes the working branch.
 // Both opt-outs mean "leave the repo alone" rather than "delete the branch but
 // stay put" -- see repo.restore for why that is all or nothing.
-func (r *repoRun) cleanup(res outcome, startBranch string) {
+func (r *repo) cleanup(res outcome, startBranch string) {
 	if r.cfg.keepBranch {
 		return
 	}
@@ -134,7 +123,7 @@ func (r *repoRun) cleanup(res outcome, startBranch string) {
 //
 // stdin is deliberately left unset -- the command runs against /dev/null, so it
 // cannot consume input meant for mkprs itself.
-func (r *repoRun) runCommand() error {
+func (r *repo) runCommand() error {
 	abs := resolvePath(r.path)
 	expanded := expandCommand(r.cfg.command, abs)
 
@@ -154,7 +143,7 @@ func (r *repoRun) runCommand() error {
 // ready for a pull request. A nil outcome means it did; anything else ends the
 // repo here. It returns an outcome rather than an error because "the command
 // changed nothing" is a skip, not a failure.
-func (r *repoRun) commitAndPush(p prep) outcome {
+func (r *repo) commitAndPush(p prep) outcome {
 	branch := r.cfg.branch
 
 	work, ok := r.headBranch()
@@ -165,14 +154,14 @@ func (r *repoRun) commitAndPush(p prep) outcome {
 		return r.fail(fmt.Sprintf("command left the repo on '%s', not '%s'", work, branch))
 	}
 
-	if err := r.git(stageAll()).toLog().run(); err != nil {
+	if err := git(r.path, stageAll()).to(r.log(), r.log()).run(); err != nil {
 		return r.fail("could not stage changes")
 	}
 
 	// --quiet exits 0 when there is nothing staged. Nothing staged is not the
 	// same as nothing done: the command may have committed its own work.
-	if !r.git(nothingStaged()).ok() {
-		if err := r.git(commit(r.cfg.message)).toLog().run(); err != nil {
+	if !git(r.path, nothingStaged()).ok() {
+		if err := git(r.path, commit(r.cfg.message)).to(r.log(), r.log()).run(); err != nil {
 			return r.fail("could not commit")
 		}
 	}
@@ -189,7 +178,7 @@ func (r *repoRun) commitAndPush(p prep) outcome {
 		return skip("command made no changes")
 	}
 
-	if err := r.git(push(branch)).toLog().run(); err != nil {
+	if err := git(r.path, push(branch)).to(r.log(), r.log()).run(); err != nil {
 		return r.fail(fmt.Sprintf("unable to push to origin/%s", branch))
 	}
 
@@ -199,13 +188,13 @@ func (r *repoRun) commitAndPush(p prep) outcome {
 // process runs one repo to a conclusion: the pre-flight filters, the user's
 // command, the commit and push, then the pull request. The result is named
 // because the deferred cleanup has to see it.
-func (r *repoRun) process() (res outcome) {
+func (r *repo) process() (res outcome) {
 	p, res := r.preflight()
 	if res != nil {
 		return res
 	}
 
-	if err := r.git(createBranch(r.cfg.branch, p.base)).toLog().run(); err != nil {
+	if err := git(r.path, createBranch(r.cfg.branch, p.base)).to(r.log(), r.log()).run(); err != nil {
 		return r.fail("could not create branch")
 	}
 	// The branch exists from here on, so the repo needs restoring however we leave.

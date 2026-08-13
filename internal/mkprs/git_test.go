@@ -1,7 +1,7 @@
 package mkprs
 
 import (
-	"io"
+	"bytes"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,28 +16,22 @@ var badRef = gitArgs{"rev-parse", "--verify", "refs/heads/nope"}
 func TestGitRunStreams(t *testing.T) {
 	t.Parallel()
 
-	t.Run("text returns stdout and hides stderr", func(t *testing.T) {
+	t.Run("text returns stdout", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		out := newCapture("x", false, io.Discard)
-		r := repo{path: f.repo("x"), output: out}
-		got, err := r.git(currentHeadRef()).text()
+		got, err := git(f.repo("x"), currentHeadRef()).text()
 		if err != nil || got != "main" {
 			t.Errorf("text = %q, %v; want main, nil", got, err)
 		}
-		if !out.empty() {
-			t.Errorf("output = %q, want an unredirected run to leave the capture alone", out.String())
-		}
 	})
 
-	t.Run("toLog writes both streams", func(t *testing.T) {
+	t.Run("to writes both streams", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		out := newCapture("x", false, io.Discard)
-		r := repo{path: f.repo("x"), output: out}
-		if err := r.git(badRef).toLog().run(); err == nil {
+		var out bytes.Buffer
+		if err := git(f.repo("x"), badRef).to(&out, &out).run(); err == nil {
 			t.Fatal("run err = nil, want a failure")
 		}
 		if !strings.Contains(out.String(), "fatal:") {
@@ -45,25 +39,24 @@ func TestGitRunStreams(t *testing.T) {
 		}
 	})
 
-	// errToLog exists for `git branch -D`, whose stdout is noise.
-	t.Run("errToLog writes stderr only", func(t *testing.T) {
+	// A nil out exists for `git branch -D`, whose stdout is noise.
+	t.Run("a nil out discards stdout", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
 		dir := f.repo("x")
 		gitCmd(t, dir, "branch", "work")
 
-		out := newCapture("x", false, io.Discard)
-		r := repo{path: dir, output: out}
-		if err := r.git(deleteBranch("work")).errToLog().run(); err != nil {
+		var out bytes.Buffer
+		if err := git(dir, deleteBranch("work")).to(nil, &out).run(); err != nil {
 			t.Fatalf("run err = %v, want nil", err)
 		}
-		if !out.empty() {
+		if out.Len() != 0 {
 			t.Errorf("output = %q, want stdout discarded", out.String())
 		}
 
 		// Same command again, now that the branch is gone.
-		if err := r.git(deleteBranch("work")).errToLog().run(); err == nil {
+		if err := git(dir, deleteBranch("work")).to(nil, &out).run(); err == nil {
 			t.Fatal("run err = nil, want a failure")
 		}
 		if !strings.Contains(out.String(), "not found") {
@@ -76,10 +69,10 @@ func TestGitRunStreams(t *testing.T) {
 
 		f := newFixture(t)
 		dir := f.repo("x")
-		if !at(dir).git(localBranchExists("main")).ok() {
+		if !git(dir, localBranchExists("main")).ok() {
 			t.Error("ok = false for a branch that exists")
 		}
-		if at(dir).git(badRef).ok() {
+		if git(dir, badRef).ok() {
 			t.Error("ok = true for a ref that does not exist")
 		}
 	})
@@ -91,7 +84,7 @@ func TestGitErrorCarriesStderr(t *testing.T) {
 	t.Parallel()
 
 	f := newFixture(t)
-	_, err := at(f.repo("x")).git(badRef).text()
+	_, err := git(f.repo("x"), badRef).text()
 	if err == nil {
 		t.Fatal("text err = nil, want a failure")
 	}
@@ -106,10 +99,9 @@ func TestLoggedErrorDoesNotRepeatStderr(t *testing.T) {
 	t.Parallel()
 
 	f := newFixture(t)
-	out := newCapture("x", false, io.Discard)
-	r := repo{path: f.repo("x"), output: out}
+	var out bytes.Buffer
 
-	err := r.git(badRef).toLog().run()
+	err := git(f.repo("x"), badRef).to(&out, &out).run()
 	if err == nil {
 		t.Fatal("run err = nil, want a failure")
 	}

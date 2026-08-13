@@ -9,41 +9,29 @@ import (
 	"strings"
 )
 
-// repo is a repository mkprs is working in: where it is, and where what git
-// says about it goes.
-type repo struct {
-	path string
-	// output is nil for the two callers that ask git a question outside any
-	// repo -- validateBranchName and discoverRepos -- which have nowhere to
-	// stream to. See log.
-	output *capture
-}
+// gitArgs is one git invocation's arguments. Every git command mkprs runs is
+// named at the foot of this file, so a call site reads as intent rather than as
+// git flags.
+type gitArgs []string
 
-// log is where a git command's streams go, and the one place that decides it.
-func (r repo) log() io.Writer {
-	if r.output == nil {
-		return io.Discard
-	}
-	return r.output
-}
-
-func (r repo) git(args gitArgs) *gitRun {
-	return &gitRun{repo: r, args: args}
+// git prepares one git invocation in dir. An empty dir runs it wherever mkprs
+// itself is running, which is what the questions that belong to no repository
+// need.
+func git(dir string, args gitArgs) *gitRun {
+	return &gitRun{dir: dir, args: args}
 }
 
 type gitRun struct {
-	repo
+	dir            string
 	args           gitArgs
 	stdout, stderr io.Writer
 }
 
-func (g *gitRun) toLog() *gitRun {
-	g.stdout, g.stderr = g.log(), g.log()
-	return g
-}
-
-func (g *gitRun) errToLog() *gitRun {
-	g.stderr = g.log()
+// to routes the command's output. A nil out discards that stream; a nil errOut
+// keeps git's complaint for the error instead, which is what an unrouted run
+// gets -- see run.
+func (g *gitRun) to(out, errOut io.Writer) *gitRun {
+	g.stdout, g.stderr = out, errOut
 	return g
 }
 
@@ -60,7 +48,7 @@ func (g *gitRun) run() error {
 	}
 
 	cmd := exec.Command("git", g.args...)
-	cmd.Dir = g.path
+	cmd.Dir = g.dir
 	cmd.Stdout, cmd.Stderr = g.stdout, stderr
 
 	return gitError(cmd.Run(), complaint.String())
@@ -100,109 +88,65 @@ func gitError(err error, stderr string) error {
 // exists for -- a flag left without its value, as in `mkprs ~/repos -b --draft
 // -- true`.
 func validateBranchName(branch string) error {
-	// check-ref-format reads only its argument, so there is no repo to run it
-	// in; the zero repo leaves cmd.Dir unset, i.e. the process's own cwd.
-	if strings.HasPrefix(branch, "-") || !(repo{}).git(checkFormat(branch)).ok() {
+	// check-ref-format reads only its argument, so there is no repository for
+	// this to run in.
+	if strings.HasPrefix(branch, "-") || !git("", checkFormat(branch)).ok() {
 		return fmt.Errorf("invalid branch name %q (see 'git help check-ref-format')", branch)
 	}
 	return nil
 }
 
-// originURL is the configured (not insteadOf-rewritten) URL of origin.
-func (r repo) originURL() (string, error) {
-	return r.git(remoteOriginURL()).text()
+// =============================================================================
+// The commands
+// =============================================================================
+
+func fetch() gitArgs { return gitArgs{"fetch", "origin", "--quiet", "--prune"} }
+
+func createBranch(name, base string) gitArgs {
+	return gitArgs{"checkout", "-b", name, base, "--quiet"}
 }
 
-// isGitHubRepo reports whether origin points at github.com, and the reason when
-// it does not.
-func (r repo) isGitHubRepo() (bool, string) {
-	url, err := r.originURL()
-	if err != nil {
-		return false, "no 'origin' remote"
-	}
-	if !strings.Contains(url, "github.com:") && !strings.Contains(url, "github.com/") {
-		return false, fmt.Sprintf("non-GitHub remote (%s)", url)
-	}
-	return true, ""
+func checkoutBranch(name string) gitArgs { return gitArgs{"checkout", name, "--quiet"} }
+
+func deleteBranch(name string) gitArgs { return gitArgs{"branch", "-D", name} }
+
+func stageAll() gitArgs { return gitArgs{"add", "-A"} }
+
+// nothingStaged succeeds when the index holds no changes: --quiet makes diff
+// exit 0 for an empty diff and 1 otherwise.
+func nothingStaged() gitArgs { return gitArgs{"diff", "--cached", "--quiet"} }
+
+func commit(message string) gitArgs { return gitArgs{"commit", "-q", "-m", message} }
+
+func push(branch string) gitArgs { return gitArgs{"push", "-u", "origin", branch, "--quiet"} }
+
+// remoteOriginURL reads the configured URL rather than the effective one:
+// `remote get-url` applies url.<base>.insteadOf rewrites, which would report a
+// GitHub remote as whatever the user rewrote it to.
+func remoteOriginURL() gitArgs { return gitArgs{"config", "--get", "remote.origin.url"} }
+
+func status() gitArgs { return gitArgs{"status", "--porcelain"} }
+
+func originHeadRef() gitArgs {
+	return gitArgs{"symbolic-ref", "--short", "refs/remotes/origin/HEAD"}
 }
 
-// isCleanTree reports whether the working tree has no changes, and whether the
-// question could be answered at all.
-func (r repo) isCleanTree() (clean, ok bool) {
-	out, err := r.git(status()).text()
-	if err != nil {
-		return false, false
-	}
-	return out == "", true
+func currentHeadRef() gitArgs { return gitArgs{"symbolic-ref", "--short", "HEAD"} }
+
+func localBranchExists(branch string) gitArgs { return verifyRef("refs/heads/" + branch) }
+
+func originBranchExists(branch string) gitArgs {
+	return verifyRef("refs/remotes/origin/" + branch)
 }
 
-// defaultBranch resolves the repo's default branch, preferring origin/HEAD and
-// falling back to the conventional names.
-func (r repo) defaultBranch() (string, bool) {
-	if name, err := r.git(originHeadRef()).text(); err == nil && name != "" {
-		return strings.TrimPrefix(name, "origin/"), true
-	}
-	for _, candidate := range []string{"main", "master"} {
-		if r.git(originBranchExists(candidate)).ok() {
-			return candidate, true
-		}
-	}
-	return "", false
+func verifyRef(ref string) gitArgs { return gitArgs{"rev-parse", "--verify", "--quiet", ref} }
+
+func commitsAhead(base, branch string) gitArgs {
+	return gitArgs{"rev-list", "--count", base + ".." + branch}
 }
 
-// branchLocation reports where the branch already exists -- "locally", "on
-// origin", or "" when it does not exist at all. Local wins when both match.
-//
-// The origin half reads a remote-tracking ref, which is only as fresh as the
-// last fetch: call this after a pruning fetch, or a branch deleted upstream
-// still looks like it exists.
-func (r repo) branchLocation(branch string) string {
-	if r.git(localBranchExists(branch)).ok() {
-		return "locally"
-	}
-	if r.git(originBranchExists(branch)).ok() {
-		return "on origin"
-	}
-	return ""
-}
+func repoRoot() gitArgs { return gitArgs{"rev-parse", "--show-toplevel"} }
 
-// resolveBase prefers the remote-tracking ref so new branches start from what
-// origin has, not from a stale local branch.
-func (r repo) resolveBase(defaultBranch string) string {
-	if r.git(originBranchExists(defaultBranch)).ok() {
-		return "origin/" + defaultBranch
-	}
-	return defaultBranch
-}
-
-// headBranch is the checked-out branch, and whether HEAD is on a branch at all.
-// symbolic-ref fails on a detached HEAD, which is the distinction callers need.
-func (r repo) headBranch() (string, bool) {
-	name, err := r.git(currentHeadRef()).text()
-	if err != nil || name == "" {
-		return "", false
-	}
-	return name, true
-}
-
-// branchAhead reports whether branch carries commits that base does not, and
-// whether the question could be answered at all. This is what decides that a
-// repo has something to open a PR for.
-func (r repo) branchAhead(base, branch string) (ahead, ok bool) {
-	out, err := r.git(commitsAhead(base, branch)).text()
-	if err != nil {
-		return false, false
-	}
-	return out != "0", true
-}
-
-// restore abandons the working branch and returns the repo to startBranch.
-// The checkout and the delete go together on purpose: checking out with the
-// command's uncommitted edits still in the tree can carry them across, leaving
-// those edits stranded on startBranch after the branch that explains them is
-// gone. Callers that do not want the branch deleted must not call this at all.
-func (r repo) restore(startBranch, branch string) {
-	_ = r.git(checkoutBranch(startBranch)).toLog().run()
-	// The "Deleted branch" line is noise, but errors belong in the capture.
-	_ = r.git(deleteBranch(branch)).errToLog().run()
+func checkFormat(branch string) gitArgs {
+	return gitArgs{"check-ref-format", "refs/heads/" + branch}
 }

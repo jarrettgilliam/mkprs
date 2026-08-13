@@ -124,7 +124,7 @@ func (a *app) processAll(repos []string) int {
 
 	for i, repoPath := range repos {
 		name := filepath.Base(repoPath)
-		r := newRepoRun(a.cfg, a.prs, repoPath, newCapture(name, a.cfg.verbose, a.out))
+		r := newRepo(a.cfg, a.prs, repoPath, newCapture(name, a.cfg.verbose, a.out))
 
 		res := r.process()
 		r.output.flush()
