@@ -151,7 +151,7 @@ func TestRunStagesEveryChange(t *testing.T) {
 
 		run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "rm", "file.txt")...)
 
-		files := gitCmd(t, f.bare("x"), "ls-tree", "--name-only", "b")
+		files := gitCmdHelper(t, f.bare("x"), "ls-tree", "--name-only", "b")
 		if strings.Contains(files, "file.txt") {
 			t.Errorf("file.txt still present on the branch: %q", files)
 		}
@@ -246,10 +246,10 @@ func TestRunStartsFromAnyBranch(t *testing.T) {
 		repo := f.repo("x")
 		// Let the feature branch carry a commit of its own, so "cut from
 		// origin's default" and "cut from wherever we were" are distinguishable.
-		gitCmd(t, repo, "checkout", "-q", "-b", "feature")
+		gitCmdHelper(t, repo, "checkout", "-q", "-b", "feature")
 		writeFile(t, filepath.Join(repo, "feature-only.txt"), "wip")
-		gitCmd(t, repo, "add", "-A")
-		gitCmd(t, repo, "commit", "-q", "-m", "feature work")
+		gitCmdHelper(t, repo, "add", "-A")
+		gitCmdHelper(t, repo, "commit", "-q", "-m", "feature work")
 		prs := &fakePR{}
 
 		got := run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
@@ -262,7 +262,7 @@ func TestRunStartsFromAnyBranch(t *testing.T) {
 		}
 		// Cut from origin/main, so the feature branch's own work is not
 		// along for the ride.
-		if tree := gitCmd(t, f.bare("x"), "ls-tree", "-r", "--name-only", "b"); strings.Contains(tree, "feature-only.txt") {
+		if tree := gitCmdHelper(t, f.bare("x"), "ls-tree", "-r", "--name-only", "b"); strings.Contains(tree, "feature-only.txt") {
 			t.Errorf("pushed tree = %q, want it cut from the default branch", tree)
 		}
 		// The PR still targets the default branch, not the branch the repo
@@ -281,7 +281,7 @@ func TestRunStartsFromAnyBranch(t *testing.T) {
 
 		f := newFixture(t)
 		repo := f.repo("x")
-		gitCmd(t, repo, "checkout", "-q", "--detach")
+		gitCmdHelper(t, repo, "checkout", "-q", "--detach")
 		prs := &fakePR{}
 
 		got := run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
@@ -320,7 +320,7 @@ func TestRunRefusesABranchSwitch(t *testing.T) {
 		{
 			name: "a pre-existing branch",
 			setup: func(t *testing.T, f *fixture, repo string) {
-				gitCmd(t, repo, "branch", "other")
+				gitCmdHelper(t, repo, "branch", "other")
 			},
 			command:  func(t *testing.T) []string { return helperCmd(t, "gitcheckout", "other") },
 			want:     "command left the repo on 'other', not 'b'",
@@ -403,10 +403,10 @@ func TestRunLeavesTheCommandsBranchAlone(t *testing.T) {
 	if !localHasBranch(t, repo, "other") {
 		t.Fatal("the command's branch was deleted, it should survive")
 	}
-	if got, want := gitCmd(t, repo, "log", "-1", "--pretty=%s", "other"), "committed by the command"; got != want {
+	if got, want := gitCmdHelper(t, repo, "log", "-1", "--pretty=%s", "other"), "committed by the command"; got != want {
 		t.Errorf("'other' subject = %q, want %q", got, want)
 	}
-	if got, want := gitCmd(t, repo, "show", "other:file.txt"), "by the command"; got != want {
+	if got, want := gitCmdHelper(t, repo, "show", "other:file.txt"), "by the command"; got != want {
 		t.Errorf("'other' file = %q, want %q", got, want)
 	}
 }
@@ -490,9 +490,9 @@ func TestRunPrunesStaleRemoteBranch(t *testing.T) {
 	repo := f.repo("stale")
 
 	// Exactly the state GitHub leaves after "delete branch on merge".
-	gitCmd(t, repo, "push", "-q", "origin", "HEAD:refs/heads/gone")
-	gitCmd(t, repo, "fetch", "-q", "origin")
-	gitCmd(t, f.bare("stale"), "update-ref", "-d", "refs/heads/gone")
+	gitCmdHelper(t, repo, "push", "-q", "origin", "HEAD:refs/heads/gone")
+	gitCmdHelper(t, repo, "fetch", "-q", "origin")
+	gitCmdHelper(t, f.bare("stale"), "update-ref", "-d", "refs/heads/gone")
 	if got := at(repo).branchLocation("gone"); got != "on origin" {
 		t.Fatalf("fixture: branchLocation = %q, want a stale ref to be present", got)
 	}
@@ -557,7 +557,7 @@ func TestRunFailures(t *testing.T) {
 
 		f := newFixture(t)
 		repo := f.repo("nopush")
-		gitCmd(t, repo, "config", "remote.origin.pushurl", fileURL(filepath.Join(f.root, "nowhere.git")))
+		gitCmdHelper(t, repo, "config", "remote.origin.pushurl", fileURL(filepath.Join(f.root, "nowhere.git")))
 		prs := &fakePR{}
 
 		got := run(t, prs, []string{f.targets, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)
@@ -573,7 +573,7 @@ func TestRunFailures(t *testing.T) {
 		if !localHasBranch(t, repo, "b") {
 			t.Fatal("the working branch should have been left in place")
 		}
-		if got, want := gitCmd(t, repo, "show", "b:file.txt"), "changed"; got != want {
+		if got, want := gitCmdHelper(t, repo, "show", "b:file.txt"), "changed"; got != want {
 			t.Errorf("file on the surviving branch = %q, want %q", got, want)
 		}
 		if got := currentBranch(t, repo); got != "b" {
@@ -853,7 +853,7 @@ func TestRunMultipleReposAndDirs(t *testing.T) {
 
 	other := filepath.Join(f.root, "other")
 	mkdir(t, other)
-	gitCmd(t, "", "init", "-q", "-b", "main", filepath.Join(other, "gamma"))
+	gitCmdHelper(t, "", "init", "-q", "-b", "main", filepath.Join(other, "gamma"))
 
 	prs := &fakePR{}
 	got := run(t, prs, []string{f.targets, other, "-b", "b"}, helperCmd(t, "write", "file.txt", "changed")...)

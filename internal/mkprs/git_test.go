@@ -45,7 +45,7 @@ func TestGitRunStreams(t *testing.T) {
 
 		f := newFixture(t)
 		dir := f.repo("x")
-		gitCmd(t, dir, "branch", "work")
+		gitCmdHelper(t, dir, "branch", "work")
 
 		var out bytes.Buffer
 		if err := git(dir, deleteBranch("work")).to(nil, &out).run(); err != nil {
@@ -205,7 +205,7 @@ func TestBranchLocation(t *testing.T) {
 
 		f := newFixture(t)
 		dir := f.repo("x")
-		gitCmd(t, dir, "branch", "here")
+		gitCmdHelper(t, dir, "branch", "here")
 
 		if got := at(dir).branchLocation("here"); got != "locally" {
 			t.Errorf("branchLocation = %q, want %q", got, "locally")
@@ -217,8 +217,8 @@ func TestBranchLocation(t *testing.T) {
 
 		f := newFixture(t)
 		dir := f.repo("x")
-		gitCmd(t, dir, "push", "-q", "origin", "HEAD:refs/heads/upstream-only")
-		gitCmd(t, dir, "fetch", "-q", "origin")
+		gitCmdHelper(t, dir, "push", "-q", "origin", "HEAD:refs/heads/upstream-only")
+		gitCmdHelper(t, dir, "fetch", "-q", "origin")
 
 		if got := at(dir).branchLocation("upstream-only"); got != "on origin" {
 			t.Errorf("branchLocation = %q, want %q", got, "on origin")
@@ -230,9 +230,9 @@ func TestBranchLocation(t *testing.T) {
 
 		f := newFixture(t)
 		dir := f.repo("x")
-		gitCmd(t, dir, "push", "-q", "origin", "HEAD:refs/heads/both")
-		gitCmd(t, dir, "fetch", "-q", "origin")
-		gitCmd(t, dir, "branch", "both")
+		gitCmdHelper(t, dir, "push", "-q", "origin", "HEAD:refs/heads/both")
+		gitCmdHelper(t, dir, "fetch", "-q", "origin")
+		gitCmdHelper(t, dir, "branch", "both")
 
 		if got := at(dir).branchLocation("both"); got != "locally" {
 			t.Errorf("branchLocation = %q, want %q", got, "locally")
@@ -259,14 +259,14 @@ func TestDefaultBranch(t *testing.T) {
 		f := newFixture(t)
 		dir := f.repo("dev-default")
 		// Re-point both the repo and its remote at develop.
-		gitCmd(t, dir, "branch", "develop")
-		gitCmd(t, dir, "push", "-q", "origin", "develop")
-		gitCmd(t, f.bare("dev-default"), "symbolic-ref", "HEAD", "refs/heads/develop")
-		gitCmd(t, dir, "push", "-q", "origin", "--delete", "main")
-		gitCmd(t, dir, "checkout", "-q", "develop")
-		gitCmd(t, dir, "branch", "-q", "-D", "main")
-		gitCmd(t, dir, "remote", "set-head", "origin", "develop")
-		gitCmd(t, dir, "fetch", "-q", "origin", "--prune")
+		gitCmdHelper(t, dir, "branch", "develop")
+		gitCmdHelper(t, dir, "push", "-q", "origin", "develop")
+		gitCmdHelper(t, f.bare("dev-default"), "symbolic-ref", "HEAD", "refs/heads/develop")
+		gitCmdHelper(t, dir, "push", "-q", "origin", "--delete", "main")
+		gitCmdHelper(t, dir, "checkout", "-q", "develop")
+		gitCmdHelper(t, dir, "branch", "-q", "-D", "main")
+		gitCmdHelper(t, dir, "remote", "set-head", "origin", "develop")
+		gitCmdHelper(t, dir, "fetch", "-q", "origin", "--prune")
 
 		got, ok := at(dir).defaultBranch()
 		if !ok || got != "develop" {
@@ -326,7 +326,7 @@ func TestHeadBranch(t *testing.T) {
 
 		f := newFixture(t)
 		dir := f.repo("x")
-		gitCmd(t, dir, "checkout", "-q", "--detach")
+		gitCmdHelper(t, dir, "checkout", "-q", "--detach")
 
 		if name, ok := at(dir).headBranch(); ok {
 			t.Errorf("headBranch = %q, true; want ok false when detached", name)
@@ -344,9 +344,9 @@ func TestBranchAhead(t *testing.T) {
 
 		f := newFixture(t)
 		dir := f.repo("x")
-		gitCmd(t, dir, "checkout", "-q", "-b", "work")
+		gitCmdHelper(t, dir, "checkout", "-q", "-b", "work")
 		writeFile(t, filepath.Join(dir, "file.txt"), "changed\n")
-		gitCmd(t, dir, "commit", "-q", "-a", "-m", "work")
+		gitCmdHelper(t, dir, "commit", "-q", "-a", "-m", "work")
 
 		ahead, err := at(dir).branchAhead("main", "work")
 		if err != nil {
@@ -362,7 +362,7 @@ func TestBranchAhead(t *testing.T) {
 
 		f := newFixture(t)
 		dir := f.repo("x")
-		gitCmd(t, dir, "checkout", "-q", "-b", "work")
+		gitCmdHelper(t, dir, "checkout", "-q", "-b", "work")
 
 		ahead, err := at(dir).branchAhead("main", "work")
 		if err != nil {
@@ -390,7 +390,7 @@ func TestRestoreRepo(t *testing.T) {
 
 	f := newFixture(t)
 	dir := f.repo("x")
-	gitCmd(t, dir, "checkout", "-q", "-b", "work")
+	gitCmdHelper(t, dir, "checkout", "-q", "-b", "work")
 
 	at(dir).restore("main", "work")
 

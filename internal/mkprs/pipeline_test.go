@@ -73,7 +73,7 @@ func TestPreflight(t *testing.T) {
 		repo := f.repo("x")
 		// Somewhere other than the default branch, so startBranch cannot pass
 		// by accidentally agreeing with defaultBranch.
-		gitCmd(t, repo, "checkout", "-q", "-b", "feature")
+		gitCmdHelper(t, repo, "checkout", "-q", "-b", "feature")
 
 		p, res := stepRun(config{branch: "b"}, repo, nil).preflight()
 		if res != nil {
@@ -154,12 +154,12 @@ func TestPreflight(t *testing.T) {
 			name: "no discoverable default branch",
 			setup: func(t *testing.T, f *fixture) string {
 				repo := f.repoOn("x", "trunk", "git@github.com:fake/x.git")
-				gitCmd(t, f.bare("x"), "update-ref", "-d", "refs/heads/trunk")
+				gitCmdHelper(t, f.bare("x"), "update-ref", "-d", "refs/heads/trunk")
 				// Pruning refs/remotes/origin/trunk leaves origin/HEAD pointing
 				// at it, and symbolic-ref resolves a dangling symref happily --
 				// so without this the default branch is still "trunk".
 				// --no-deref, or this deletes origin/trunk instead.
-				gitCmd(t, repo, "update-ref", "--no-deref", "-d", "refs/remotes/origin/HEAD")
+				gitCmdHelper(t, repo, "update-ref", "--no-deref", "-d", "refs/remotes/origin/HEAD")
 				return repo
 			},
 			want:  "no default branch on origin; set it with 'git remote set-head origin -a'",
@@ -169,7 +169,7 @@ func TestPreflight(t *testing.T) {
 			name: "detached HEAD",
 			setup: func(t *testing.T, f *fixture) string {
 				repo := f.repo("x")
-				gitCmd(t, repo, "checkout", "-q", "--detach")
+				gitCmdHelper(t, repo, "checkout", "-q", "--detach")
 				return repo
 			},
 			want:  "not on a branch (detached HEAD)",
@@ -179,7 +179,7 @@ func TestPreflight(t *testing.T) {
 			name: "branch already exists locally",
 			setup: func(t *testing.T, f *fixture) string {
 				repo := f.repo("x")
-				gitCmd(t, repo, "branch", "b")
+				gitCmdHelper(t, repo, "branch", "b")
 				return repo
 			},
 			want:  "branch 'b' already exists locally",
@@ -189,8 +189,8 @@ func TestPreflight(t *testing.T) {
 			name: "branch already exists on origin",
 			setup: func(t *testing.T, f *fixture) string {
 				repo := f.repo("x")
-				gitCmd(t, repo, "push", "-q", "origin", "HEAD:refs/heads/b")
-				gitCmd(t, repo, "fetch", "-q", "origin")
+				gitCmdHelper(t, repo, "push", "-q", "origin", "HEAD:refs/heads/b")
+				gitCmdHelper(t, repo, "fetch", "-q", "origin")
 				return repo
 			},
 			want:  "branch 'b' already exists on origin",
@@ -300,8 +300,8 @@ func TestCleanup(t *testing.T) {
 
 			f := newFixture(t)
 			repo := f.repo("x")
-			gitCmd(t, repo, "checkout", "-q", "-b", "feature")
-			gitCmd(t, repo, "checkout", "-q", "-b", "b")
+			gitCmdHelper(t, repo, "checkout", "-q", "-b", "feature")
+			gitCmdHelper(t, repo, "checkout", "-q", "-b", "b")
 
 			cfg := config{branch: "b", keepBranch: tt.keepBranch}
 			stepRun(cfg, repo, nil).cleanup(tt.res, "feature")
@@ -487,8 +487,8 @@ func TestCommitAndPush(t *testing.T) {
 			name: "the command committed its own work",
 			setup: func(t *testing.T, repo string) {
 				writeFile(t, filepath.Join(repo, "file.txt"), "changed\n")
-				gitCmd(t, repo, "add", "-A")
-				gitCmd(t, repo, "commit", "-q", "-m", "committed by the command")
+				gitCmdHelper(t, repo, "add", "-A")
+				gitCmdHelper(t, repo, "commit", "-q", "-m", "committed by the command")
 			},
 		},
 		{
@@ -501,14 +501,14 @@ func TestCommitAndPush(t *testing.T) {
 			// would otherwise commit to a branch mkprs does not own.
 			name: "the command switched branch",
 			setup: func(t *testing.T, repo string) {
-				gitCmd(t, repo, "checkout", "-q", "-b", "elsewhere")
+				gitCmdHelper(t, repo, "checkout", "-q", "-b", "elsewhere")
 			},
 			want: failure("command left the repo on 'elsewhere', not 'b'"),
 		},
 		{
 			name: "the command detached HEAD",
 			setup: func(t *testing.T, repo string) {
-				gitCmd(t, repo, "checkout", "-q", "--detach")
+				gitCmdHelper(t, repo, "checkout", "-q", "--detach")
 			},
 			want: failure("command left the repo with a detached HEAD"),
 		},
@@ -516,7 +516,7 @@ func TestCommitAndPush(t *testing.T) {
 			name: "the branch cannot be pushed",
 			setup: func(t *testing.T, repo string) {
 				writeFile(t, filepath.Join(repo, "file.txt"), "changed\n")
-				gitCmd(t, repo, "remote", "set-url", "origin", "git@github.com:fake/gone.git")
+				gitCmdHelper(t, repo, "remote", "set-url", "origin", "git@github.com:fake/gone.git")
 			},
 			want: failure("unable to push to origin/b"),
 		},
@@ -528,7 +528,7 @@ func TestCommitAndPush(t *testing.T) {
 
 			f := newFixture(t)
 			repo := f.repo("x")
-			gitCmd(t, repo, "checkout", "-q", "-b", "b", "origin/main")
+			gitCmdHelper(t, repo, "checkout", "-q", "-b", "b", "origin/main")
 			tt.setup(t, repo)
 
 			cfg := config{branch: "b", message: "commit msg"}

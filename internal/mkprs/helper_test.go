@@ -351,22 +351,22 @@ func (f *fixture) repoOn(name, defaultBranch, remote string) string {
 	f.t.Helper()
 
 	path := filepath.Join(f.targets, name)
-	gitCmd(f.t, "", "init", "-q", "-b", defaultBranch, path)
+	gitCmdHelper(f.t, "", "init", "-q", "-b", defaultBranch, path)
 	writeFile(f.t, filepath.Join(path, "file.txt"), "hello\n")
-	gitCmd(f.t, path, "add", "file.txt")
-	gitCmd(f.t, path, "commit", "-q", "-m", "initial commit")
+	gitCmdHelper(f.t, path, "add", "file.txt")
+	gitCmdHelper(f.t, path, "commit", "-q", "-m", "initial commit")
 
 	if remote == "" {
 		return path
 	}
-	gitCmd(f.t, path, "remote", "add", "origin", remote)
+	gitCmdHelper(f.t, path, "remote", "add", "origin", remote)
 
 	if strings.Contains(remote, "github.com") {
 		bare := filepath.Join(f.remotes, name+".git")
-		gitCmd(f.t, "", "init", "-q", "--bare", bare)
-		gitCmd(f.t, path, "config", "url."+fileURL(bare)+".insteadOf", remote)
-		gitCmd(f.t, path, "push", "-q", "-u", "origin", defaultBranch)
-		gitCmd(f.t, path, "remote", "set-head", "origin", defaultBranch)
+		gitCmdHelper(f.t, "", "init", "-q", "--bare", bare)
+		gitCmdHelper(f.t, path, "config", "url."+fileURL(bare)+".insteadOf", remote)
+		gitCmdHelper(f.t, path, "push", "-q", "-u", "origin", defaultBranch)
+		gitCmdHelper(f.t, path, "remote", "set-head", "origin", defaultBranch)
 	}
 	return path
 }
@@ -392,13 +392,13 @@ func (f *fixture) remoteHasBranch(name, branch string) bool {
 // remoteFile is a file's content on a branch of the fake GitHub side.
 func (f *fixture) remoteFile(name, branch, path string) string {
 	f.t.Helper()
-	return gitCmd(f.t, f.bare(name), "show", branch+":"+path)
+	return gitCmdHelper(f.t, f.bare(name), "show", branch+":"+path)
 }
 
 // remoteSubject is the latest commit subject on a branch of the fake side.
 func (f *fixture) remoteSubject(name, branch string) string {
 	f.t.Helper()
-	return gitCmd(f.t, f.bare(name), "log", "-1", "--pretty=%s", branch)
+	return gitCmdHelper(f.t, f.bare(name), "log", "-1", "--pretty=%s", branch)
 }
 
 // fileURL renders a path as a file:// URL. Bare Windows paths cannot go in a
@@ -417,7 +417,7 @@ func fileURL(path string) string {
 
 // git runs a git command, failing the test if it does not succeed. Use this for
 // fixture setup, where a failure is a broken test rather than a result.
-func gitCmd(t *testing.T, dir string, args ...string) string {
+func gitCmdHelper(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -439,7 +439,7 @@ func localHasBranch(t *testing.T, repo, branch string) bool {
 
 func commitCount(t *testing.T, repo, rev string) int {
 	t.Helper()
-	n, err := strconv.Atoi(gitCmd(t, repo, "rev-list", "--count", rev))
+	n, err := strconv.Atoi(gitCmdHelper(t, repo, "rev-list", "--count", rev))
 	if err != nil {
 		t.Fatalf("rev-list --count %s: %v", rev, err)
 	}
@@ -448,7 +448,7 @@ func commitCount(t *testing.T, repo, rev string) int {
 
 func currentBranch(t *testing.T, repo string) string {
 	t.Helper()
-	return gitCmd(t, repo, "rev-parse", "--abbrev-ref", "HEAD")
+	return gitCmdHelper(t, repo, "rev-parse", "--abbrev-ref", "HEAD")
 }
 
 func mkdir(t *testing.T, path string) {

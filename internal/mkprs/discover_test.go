@@ -40,7 +40,7 @@ func TestDiscoverRepos(t *testing.T) {
 		f := newFixture(t)
 		outer := f.repo("outer")
 		inner := filepath.Join(outer, "vendor", "inner")
-		gitCmd(t, "", "init", "-q", "-b", "main", inner)
+		gitCmdHelper(t, "", "init", "-q", "-b", "main", inner)
 
 		assertEqualSlice(t, "repos", mustDiscover(t, f.targets, nil), []string{outer})
 	})
@@ -55,7 +55,7 @@ func TestDiscoverRepos(t *testing.T) {
 		f := newFixture(t)
 		outer := f.repo("outer")
 		inner := filepath.Join(outer, "vendor", "inner")
-		gitCmd(t, "", "init", "-q", "-b", "main", inner)
+		gitCmdHelper(t, "", "init", "-q", "-b", "main", inner)
 
 		repos := mustDiscover(t, outer, nil)
 		repos = mustDiscover(t, inner, repos)
