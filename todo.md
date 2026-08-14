@@ -477,7 +477,7 @@ The gaps, in the order they bite:
 **Every command mkprs runs is printed to stderr, prefixed with `$`, before it
 runs** — the internal git invocations, `gh`, and the user's command alike. There
 is no category that runs silently under `-v`: if a process is started, the line
-that started it is on screen above its output. `gitRun.run` is the one place
+that started it is on screen above its output. `gitCmd.run` is the one place
 every git invocation is built and started — `ok` and `text` both funnel through
 it — so that is where the printing belongs rather than at each call site.
 

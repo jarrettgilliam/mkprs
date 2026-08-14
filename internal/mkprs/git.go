@@ -17,11 +17,11 @@ type gitArgs []string
 // git prepares one git invocation in dir. An empty dir runs it wherever mkprs
 // itself is running, which is what the questions that belong to no repository
 // need.
-func git(dir string, args gitArgs) *gitRun {
-	return &gitRun{dir: dir, args: args}
+func git(dir string, args gitArgs) *gitCmd {
+	return &gitCmd{dir: dir, args: args}
 }
 
-type gitRun struct {
+type gitCmd struct {
 	dir            string
 	args           gitArgs
 	stdout, stderr io.Writer
@@ -30,7 +30,7 @@ type gitRun struct {
 // to routes the command's output. A nil out discards that stream; a nil errOut
 // keeps git's complaint for the error instead, which is what an unrouted run
 // gets -- see run.
-func (g *gitRun) to(out, errOut io.Writer) *gitRun {
+func (g *gitCmd) to(out, errOut io.Writer) *gitCmd {
 	g.stdout, g.stderr = out, errOut
 	return g
 }
@@ -40,7 +40,7 @@ func (g *gitRun) to(out, errOut io.Writer) *gitRun {
 // git's own words; redirected, the buffer stays empty and gitError leaves the
 // error alone, since repeating a complaint already in the capture prints it
 // twice.
-func (g *gitRun) run() error {
+func (g *gitCmd) run() error {
 	var complaint bytes.Buffer
 	stderr := g.stderr
 	if stderr == nil {
@@ -54,11 +54,11 @@ func (g *gitRun) run() error {
 	return gitError(cmd.Run(), complaint.String())
 }
 
-func (g *gitRun) ok() bool { return g.run() == nil }
+func (g *gitCmd) ok() bool { return g.run() == nil }
 
 // text returns the command's trimmed stdout. Stderr reaches the error rather
 // than the caller's output unless it was redirected -- see run.
-func (g *gitRun) text() (string, error) {
+func (g *gitCmd) text() (string, error) {
 	var out bytes.Buffer
 	g.stdout = &out
 	err := g.run()
